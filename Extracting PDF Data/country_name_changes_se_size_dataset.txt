@@ -1,0 +1,11 @@
+Côte d'Ivoire -> Cote d'Ivoire
+Czech Republic -> Czechia
+Egypt, Arab. Rep. -> Egypt, Arab Rep.
+Guinea- Bissau -> Guinea-Bissau
+Iran, Islam Rep. -> Iran, Islamic Rep.
+Laos -> Lao PDR
+Netherlands, The -> Netherlands
+Syrian Arab. Rep. -> Syrian Arab Republic
+Turkey -> Turkiye
+Vietnam -> Viet Nam
+Swaziland -> Eswatini

@@ -1,0 +1,17 @@
+Belgium-Luxembourg -> Luxembourg
+Brunei -> Brunei Darussalam
+Cape Verde -> Cabo Verde
+Curaçao -> Curacao
+Czech Republic -> Czechia
+East Timor -> Timor-Leste
+Ethiopia(excludes Eritrea) -> Ethiopia
+Faeroe Islands -> Faroe Islands
+Fm Sudan -> South Sudan
+Hong Kong, China -> Hong Kong SAR, China
+Macao -> Macao SAR, China
+Serbia, FR(Serbia/Montenegro) -> Serbia
+Turkey -> Turkiye
+Turks and Caicos Isl. -> Turks and Caicos Islands
+Venezuela -> Venezuela, RB
+Vietnam -> Viet Nam
+Yemen -> Yemen, Rep.
