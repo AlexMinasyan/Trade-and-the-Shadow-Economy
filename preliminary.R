@@ -13,14 +13,28 @@ library(plm)
 library(lmtest)
 library(sandwich)
 library(broom)
+library(rstudioapi)
+
+
+######################################
+# Directory Work
+######################################
+current_path <- getSourceEditorContext()$path
+current_directory <- strsplit(current_path, '/')[[1]][1:length(strsplit(current_path, '/')[[1]]) - 1]
+current_directory <- paste(as.character(current_directory), collapse = '/')
+current_directory
+
+get_file_path <- function(path) {
+  return(paste(current_directory, path, sep="/"))
+}
 
 ######################################
 # World Integrated Trade Solutions Data
 # Weighted Average Revealed Competitive Advantage Index
 ######################################
 # Getting all WITS Files
-wits_files <- list.files(path="/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Data/WITS/EXP", pattern="*.xlsx", full.names=TRUE, recursive=FALSE)
-wits_rca_files <- list.files(path="/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Data/WITS/RCA", pattern="*.xlsx", full.names=TRUE, recursive=FALSE)
+wits_files <- list.files(path = get_file_path("Data/WITS/EXP"), pattern="*.xlsx", full.names=TRUE, recursive=FALSE)
+wits_rca_files <- list.files(path = get_file_path("Data/WITS/RCA"), pattern="*.xlsx", full.names=TRUE, recursive=FALSE)
 all_wits_tibbles = wits_files %>% map( ~read_excel(.x, sheet = "Product-TimeSeries-Product"))
 all_rca_tibbles = wits_rca_files %>% map( ~read_excel(.x, sheet = "Product-TimeSeries-Product"))
 
@@ -178,7 +192,7 @@ View(final_rca_dataframe_2)
 # Working with Country Names
 ######################################
 # Countries of se_size Dataset
-se_size_base <- read_csv('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Extracting PDF Data/size_of_the_shadow_economy.csv')
+se_size_base <- read_csv(get_file_path('Extracting PDF Data/size_of_the_shadow_economy.csv'))
 colnames(se_size_base)[1] <- 'country'
 se_dataset_countries <- unique(se_size_base$country)[-length(unique(se_size_base$country))]
 se_dataset_countries <- data.frame(matrix(unlist(se_dataset_countries), nrow=length(se_dataset_countries), byrow=TRUE))
@@ -186,7 +200,7 @@ colnames(se_dataset_countries)[1] <- 'country'
 View(se_dataset_countries)
 
 # Countries of WDI Database
-population_base <- read_csv('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Data/WDI - Population/API_SP.POP.TOTL_DS2_en_csv_v2_61.csv')
+population_base <- read_csv(get_file_path('Data/WDI - Population/API_SP.POP.TOTL_DS2_en_csv_v2_61.csv'))
 colnames(population_base)[1] <- 'country'; colnames(population_base)[2] <- 'code'
 wdi_countries_and_codes <- population_base %>% select('country', 'code')
 View(wdi_countries_and_codes)
@@ -197,7 +211,7 @@ View(merge_1)
 View(merge_1 %>% filter(is.na(code)))
 
 # Countries of wa_rca Dataset
-named_country_wca_list_raw <- scan('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Extracting PDF Data/country_name_changes_wca_dataset.txt')
+named_country_wca_list_raw <- scan(get_file_path('Extracting PDF Data/country_name_changes_wca_dataset.txt'))
 named_country_wca_list <- strsplit(named_country_wca_list_raw, "[[:space:]]->[[:space:]]")
 names(named_country_wca_list) <- sapply(named_country_wca_list, `[[`, 1)
 named_country_wca_list <- lapply(named_country_wca_list, `[`, -1)
@@ -231,13 +245,13 @@ final_rca_dataframe_4 <- final_rca_dataframe_4 %>%
 View(final_rca_dataframe_4)
 
 # IMF Countries Dataset
-named_country_imf_list_raw <- scan('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Extracting PDF Data/country_name_changes_imf_dataset.txt', what="", sep="\n")
+named_country_imf_list_raw <- scan(get_file_path('Extracting PDF Data/country_name_changes_imf_dataset.txt'), what="", sep="\n")
 named_country_imf_list <- strsplit(named_country_imf_list_raw, "[[:space:]]->[[:space:]]")
 names(named_country_imf_list) <- sapply(named_country_imf_list, `[[`, 1)
 named_country_imf_list <- lapply(named_country_imf_list, `[`, -1)
 named_country_imf_list
 
-all_government_revenue_base <- read_csv('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Data/IMF - World Revenue/dataset_2026-03-23T17_40_40.193148454Z_DEFAULT_INTEGRATION_IMF.FAD_WORLD_3.0.1.csv')
+all_government_revenue_base <- read_csv(get_file_path('Data/IMF - World Revenue/dataset_2026-03-23T17_40_40.193148454Z_DEFAULT_INTEGRATION_IMF.FAD_WORLD_3.0.1.csv'))
 all_government_revenue_base <- all_government_revenue_base %>% 
   select( c(c('COUNTRY', 'INDICATOR'), as.character(as.list(1991:2015))) )
 colnames(all_government_revenue_base)[1] <- 'country'; colnames(all_government_revenue_base)[2] <- 'indicator'
@@ -294,7 +308,7 @@ population <- population %>%
 View(population)
 
 # Net Adjusted Income per Capita
-adjusted_income_base <- read_csv('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Data/WDI - Adjusted Net National Income per Capita/API_NY.ADJ.NNTY.PC.KD_DS2_en_csv_v2_7018.csv')
+adjusted_income_base <- read_csv(get_file_path('Data/WDI - Adjusted Net National Income per Capita/API_NY.ADJ.NNTY.PC.KD_DS2_en_csv_v2_7018.csv'))
 adjusted_income_base <- adjusted_income_base[1:(length(adjusted_income_base) - 1)]
 adjusted_income <- pivot_longer(adjusted_income_base, cols = colnames(adjusted_income_base)[5:70], names_to = "year", values_to = 'adjusted_income')
 colnames(adjusted_income) <- c('country', 'code', 'indicator_name', 'indicator_code', 'year', 'adjusted_income')
@@ -304,7 +318,7 @@ adjusted_income <- adjusted_income %>%
 View(adjusted_income)
 
 # Deflating All Money to 2015 Values
-deflator_base <- read_csv('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Data/WDI - GDP Deflator/API_NY.GDP.DEFL.KD.ZG_DS2_en_csv_v2_104.csv')
+deflator_base <- read_csv(get_file_path('Data/WDI - GDP Deflator/API_NY.GDP.DEFL.KD.ZG_DS2_en_csv_v2_104.csv'))
 deflator_base <- deflator_base[1:(length(deflator_base) - 1)]
 deflator_us <- deflator_base[deflator_base[['Country Code']] == 'USA',]
 deflator_us <- pivot_longer(deflator_us, cols = colnames(deflator_us)[5:70], names_to = "year", values_to = 'deflator')
@@ -324,7 +338,7 @@ deflator_us <- deflator_us %>%
 View(deflator_us)
 
 # Converting all LCUs to USD 2015
-exchange_rate_base <- read_csv('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Data/WDI - Official Exchange Rate/API_PA.NUS.FCRF_DS2_en_csv_v2_58.csv')
+exchange_rate_base <- read_csv(get_file_path('Data/WDI - Official Exchange Rate/API_PA.NUS.FCRF_DS2_en_csv_v2_58.csv'))
 exchange_rate_base <- exchange_rate_base[1:(length(exchange_rate_base) - 1)]
 exchange_rate <- pivot_longer(exchange_rate_base, cols = colnames(exchange_rate_base)[5:70], names_to = "year", values_to = 'lcu_to_usd')
 colnames(exchange_rate) <- c('country', 'code', 'indicator_name', 'indicator_code', 'year', 'lcu_to_usd')
@@ -345,7 +359,7 @@ View(exchange_rate)
 
 
 # international taxes
-taxes_on_intl_base <- read_csv('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Data/WDI - Taxes on International Trade/API_GC.TAX.INTT.CN_DS2_en_csv_v2_12651.csv')
+taxes_on_intl_base <- read_csv(get_file_path('Data/WDI - Taxes on International Trade/API_GC.TAX.INTT.CN_DS2_en_csv_v2_12651.csv'))
 taxes_on_intl_base <- taxes_on_intl_base[1:(length(taxes_on_intl_base) - 1)]
 taxes_on_intl = pivot_longer(taxes_on_intl_base, cols = colnames(taxes_on_intl_base)[5:70], names_to = "year", values_to = 'intl_taxes_collected')
 colnames(taxes_on_intl) <- c('country', 'code', 'indicator_name', 'indicator_code', 'year', 'intl_taxes_collected')
@@ -376,7 +390,7 @@ taxes_on_intl_percentage <- taxes_on_intl_percentage %>%
 View(taxes_on_intl_percentage)
 
 # Social Contributions
-social_contributions_base <- read_csv('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Data/WDI - Social Contributions/API_GC.REV.SOCL.CN_DS2_en_csv_v2_12643.csv')
+social_contributions_base <- read_csv(get_file_path('Data/WDI - Social Contributions/API_GC.REV.SOCL.CN_DS2_en_csv_v2_12643.csv'))
 social_contributions_base <- social_contributions_base[1:(length(social_contributions_base) - 1)]
 social_contributions = pivot_longer(social_contributions_base, cols = colnames(social_contributions_base)[5:70], names_to = "year", values_to = 'social_contributions')
 colnames(social_contributions) <- c('country', 'code', 'indicator_name', 'indicator_code', 'year', 'social_contributions')
@@ -404,7 +418,7 @@ View(social_contributions_percentage)
 
 
 # effectively applied weighted average tariffs
-tariff_rate_base <- read_csv('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Data/WDI - Tariff Rate, Applied, Weighted Mean, All Products/API_TM.TAX.MRCH.WM.AR.ZS_DS2_en_csv_v2_440.csv')
+tariff_rate_base <- read_csv(get_file_path('Data/WDI - Tariff Rate, Applied, Weighted Mean, All Products/API_TM.TAX.MRCH.WM.AR.ZS_DS2_en_csv_v2_440.csv'))
 tariff_rate_base <- tariff_rate_base[1:(length(tariff_rate_base) - 1)]
 tariff_rate = pivot_longer(tariff_rate_base, cols = colnames(tariff_rate_base)[5:70], names_to = "year", values_to = 'applied_tariff_rate')
 colnames(tariff_rate) <- c('country', 'code', 'indicator_name', 'indicator_code', 'year', 'applied_tariff_rate')
@@ -414,7 +428,7 @@ View(tariff_rate)
 
 
 # exports
-exports_base <- read_csv('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Data/WDI - Exports of Goods and Services (constant 2015 US)/API_NE.EXP.GNFS.KD_DS2_en_csv_v2_7684.csv')
+exports_base <- read_csv(get_file_path('Data/WDI - Exports of Goods and Services (constant 2015 US)/API_NE.EXP.GNFS.KD_DS2_en_csv_v2_7684.csv'))
 exports_base <- exports_base[1:(length(exports_base) - 1)]
 exports = pivot_longer(exports_base, cols = colnames(exports_base)[5:70], names_to = "year", values_to = 'exports')
 colnames(exports) <- c('country', 'code', 'indicator_name', 'indicator_code', 'year', 'exports')
@@ -428,7 +442,7 @@ exports_with_per_cap <- exports_with_per_cap %>%
 View(exports_with_per_cap)
 
 # imports
-imports_base <- read_csv('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Data/WDI - Imports of Goods and Services (constant 2015 US)/API_NE.IMP.GNFS.KD_DS2_en_csv_v2_14087.csv')
+imports_base <- read_csv(get_file_path('Data/WDI - Imports of Goods and Services (constant 2015 US)/API_NE.IMP.GNFS.KD_DS2_en_csv_v2_14087.csv'))
 imports_base <- imports_base[1:(length(imports_base) - 1)]
 imports = pivot_longer(imports_base, cols = colnames(imports_base)[5:70], names_to = "year", values_to = 'imports')
 colnames(imports) <- c('country', 'code', 'indicator_name', 'indicator_code', 'year', 'imports')
@@ -444,25 +458,25 @@ View(imports_with_per_cap)
 
 # Regulatory Strength, Corruption, and Institutions (range from -2.5 to 2.5)
 # Control of Corruption
-wgi_coc_base <- read_csv('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Data/WDI - WGI Control of Corruption/API_CC.EST_DS2_en_csv_v2_4455.csv')
+wgi_coc_base <- read_csv(get_file_path('Data/WDI - WGI Control of Corruption/API_CC.EST_DS2_en_csv_v2_4455.csv'))
 wgi_coc_base <- wgi_coc_base[1:(length(wgi_coc_base) - 1)]
 wgi_coc = pivot_longer(wgi_coc_base, cols = colnames(wgi_coc_base)[5:70], names_to = "year", values_to = 'control_corruption')
 wgi_coc <- wgi_coc %>% mutate(control_corruption = control_corruption * 10) %>% select(!c('Indicator Name', 'Indicator Code'))
 colnames(wgi_coc) <- c('country', 'code', 'year', 'control_corruption')
 # Government Effectiveness
-wgi_goveff_base <- read_csv('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Data/WDI - WGI Government Effectiveness/API_GE.EST_DS2_en_csv_v2_4300.csv')
+wgi_goveff_base <- read_csv(get_file_path('Data/WDI - WGI Government Effectiveness/API_GE.EST_DS2_en_csv_v2_4300.csv'))
 wgi_goveff_base <- wgi_goveff_base[1:(length(wgi_goveff_base) - 1)]
 wgi_goveff = pivot_longer(wgi_goveff_base, cols = colnames(wgi_goveff_base)[5:70], names_to = "year", values_to = 'govern_effective')
 wgi_goveff <- wgi_goveff %>% mutate(govern_effective = govern_effective * 10) %>% select(!c('Indicator Name', 'Indicator Code'))
 colnames(wgi_goveff) <- c('country', 'code', 'year', 'govern_effective')
 # Regulatory Quality
-wgi_regqua_base <- read_csv('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Data/WDI - WGI Regulatory Quality/API_RQ.EST_DS2_en_csv_v2_8225.csv')
+wgi_regqua_base <- read_csv(get_file_path('Data/WDI - WGI Regulatory Quality/API_RQ.EST_DS2_en_csv_v2_8225.csv'))
 wgi_regqua_base <- wgi_regqua_base[1:(length(wgi_regqua_base) - 1)]
 wgi_regqua = pivot_longer(wgi_regqua_base, cols = colnames(wgi_regqua_base)[5:70], names_to = "year", values_to = 'regulatory_quality')
 wgi_regqua <- wgi_regqua %>% mutate(regulatory_quality = regulatory_quality * 10) %>% select(!c('Indicator Name', 'Indicator Code'))
 colnames(wgi_regqua) <- c('country', 'code', 'year', 'regulatory_quality')
 # Rule of Law
-wgi_rulelaw_base <- read_csv('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Data/WDI - WGI Rule of Law/API_RL.EST_DS2_en_csv_v2_5814.csv')
+wgi_rulelaw_base <- read_csv(get_file_path('Data/WDI - WGI Rule of Law/API_RL.EST_DS2_en_csv_v2_5814.csv'))
 wgi_rulelaw_base <- wgi_rulelaw_base[1:(length(wgi_rulelaw_base) - 1)]
 wgi_rulelaw = pivot_longer(wgi_rulelaw_base, cols = colnames(wgi_rulelaw_base)[5:70], names_to = "year", values_to = 'rule_of_law')
 wgi_rulelaw <- wgi_rulelaw %>% mutate(rule_of_law = rule_of_law * 10) %>% select(!c('Indicator Name', 'Indicator Code'))
@@ -485,7 +499,7 @@ wa_rca <- wa_rca %>%
 View(wa_rca)
 
 # Index of Economic Freedom
-econ_freedom <- read_csv('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Data/Index of Economic Freedom/heritage-index-of-economic-freedom-2026-03-12_2236.csv')
+econ_freedom <- read_csv(get_file_path('Data/Index of Economic Freedom/heritage-index-of-economic-freedom-2026-03-12_2236.csv'))
 colnames(econ_freedom)[2] <- 'year'
 for (i in 1:length(colnames(econ_freedom))) {
   colnames(econ_freedom)[i] <- tolower(gsub(' ', '_', colnames(econ_freedom)[i]))
@@ -498,7 +512,7 @@ View(econ_freedom %>% filter(is.na(code)))
 View(econ_freedom)
 
 # GDP per Capita PPP (Current International $)
-gdp_per_cap_base <- read_csv('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Data/WDI - GDP per Capita PPP/API_NY.GDP.PCAP.PP.CD_DS2_en_csv_v2_35.csv')
+gdp_per_cap_base <- read_csv(get_file_path('Data/WDI - GDP per Capita PPP/API_NY.GDP.PCAP.PP.CD_DS2_en_csv_v2_35.csv'))
 gdp_per_cap_base <- gdp_per_cap_base[1:(length(gdp_per_cap_base) - 1)]
 gdp_per_cap = pivot_longer(gdp_per_cap_base, cols = colnames(gdp_per_cap_base)[5:70], names_to = "year", values_to = 'gdp_per_cap')
 colnames(gdp_per_cap) <- c('country', 'code', 'indicator_name', 'indicator_code', 'year', 'gdp_per_cap')
@@ -508,7 +522,7 @@ gdp_per_cap <- gdp_per_cap %>%
 View(gdp_per_cap)
 
 # Taxes on Goods and Services
-vat_base <- read_csv('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Data/WDI - Taxes on Goods and Services (Percentage VAT)/API_GC.TAX.GSRV.VA.ZS_DS2_en_csv_v2_12285.csv')
+vat_base <- read_csv(get_file_path('Data/WDI - Taxes on Goods and Services (Percentage VAT)/API_GC.TAX.GSRV.VA.ZS_DS2_en_csv_v2_12285.csv'))
 vat_base <- vat_base[1:(length(vat_base) - 1)]
 vat <- pivot_longer(vat_base, cols = colnames(vat_base)[5:70], names_to = "year", values_to = 'vat')
 colnames(vat) <- c('country', 'code', 'indicator_name', 'indicator_code', 'year', 'vat')
@@ -517,7 +531,7 @@ vat <- vat %>%
   filter(year %in% as.list(1991:2015)) %>% filter(country %in% countries_to_keep)
 View(vat)
 
-vat_lcu_base <- read_csv('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Data/WDI - Taxes on Goods and Services (Current LCU)/API_GC.TAX.GSRV.CN_DS2_en_csv_v2_7514.csv')
+vat_lcu_base <- read_csv(get_file_path('Data/WDI - Taxes on Goods and Services (Current LCU)/API_GC.TAX.GSRV.CN_DS2_en_csv_v2_7514.csv'))
 vat_lcu_base <- vat_lcu_base[1:(length(vat_lcu_base) - 1)]
 vat_lcu <- pivot_longer(vat_lcu_base, cols = colnames(vat_lcu_base)[5:70], names_to = "year", values_to = 'vat_lcu')
 colnames(vat_lcu) <- c('country', 'code', 'indicator_name', 'indicator_code', 'year', 'vat_lcu')
@@ -526,7 +540,7 @@ vat_lcu <- vat_lcu %>%
   filter(year %in% as.list(1991:2015)) %>% filter(country %in% countries_to_keep)
 View(vat_lcu)
 
-income_tax_base <- read_csv('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Data/WDI - Taxes on Income, Profits, and Capital Gains/API_GC.TAX.YPKG.CN_DS2_en_csv_v2_12653.csv')
+income_tax_base <- read_csv(get_file_path('Data/WDI - Taxes on Income, Profits, and Capital Gains/API_GC.TAX.YPKG.CN_DS2_en_csv_v2_12653.csv'))
 income_tax_base <- income_tax_base[1:(length(income_tax_base) - 1)]
 income_tax <- pivot_longer(income_tax_base, cols = colnames(income_tax_base)[5:70], names_to = "year", values_to = 'income_tax')
 colnames(income_tax) <- c('country', 'code', 'indicator_name', 'indicator_code', 'year', 'income_tax')
@@ -742,6 +756,8 @@ colSums(is.na(trade_and_the_se_df))
 trade_and_the_se_df$tax_burden <- factor(trade_and_the_se_df$tax_burden) 
 trade_and_the_se_df$tax_burden <- unfactor(trade_and_the_se_df$tax_burden) 
 View(trade_and_the_se_df)
+
+write.csv2(trade_and_the_se_df, file = get_file_path('trade_and_the_se.csv'))
 
 
 ######################################
