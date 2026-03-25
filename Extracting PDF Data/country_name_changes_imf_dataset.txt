@@ -1,0 +1,57 @@
+Afghanistan, Islamic Republic of -> Afghanistan
+Andorra, Principality of -> Andorra
+Armenia, Republic of -> Armenia
+Aruba, Kingdom of the Netherlands -> Aruba
+Azerbaijan, Republic of -> Azerbaijan
+Bahrain, Kingdom of -> Bahrain
+Belarus, Republic of -> Belarus
+China, People's Republic of -> China
+Comoros, Union of the -> Comoros
+Congo, Democratic Republic of the -> Congo, Dem. Rep.
+Congo, Republic of -> Congo, Rep.
+Côte d'Ivoire -> Cote d'Ivoire
+Croatia, Republic of -> Croatia
+Czech Republic -> Czechia
+Egypt, Arab Republic of -> Egypt, Arab Rep.
+Equatorial Guinea, Republic of -> Equatorial Guinea
+Eritrea, The State of -> Eritrea
+Estonia, Republic of -> Estonia
+Eswatini, Kingdom of -> Eswatini
+Ethiopia, The Federal Democratic Republic of -> Ethiopia
+Fiji, Republic of -> Fiji
+Hong Kong Special Administrative Region, People's Republic of China -> Hong Kong SAR, China
+Iran, Islamic Republic of -> Iran, Islamic Rep.
+Kazakhstan, Republic of -> Kazakhstan
+Korea, Republic of -> Korea, Rep.
+Kosovo, Republic of -> Kosovo
+Lao People's Democratic Republic -> Lao PDR
+Latvia, Republic of -> Latvia
+Lesotho, Kingdom of -> Lesotho
+Liechtenstein, Principality of -> Liechtenstein
+Lithuania, Republic of -> Lithuania
+Macao Special Administrative Region, People's Republic of China -> Macao SAR, China
+Madagascar, Republic of -> Madagascar
+Marshall Islands, Republic of the -> Marshall Islands
+Mauritania, Islamic Republic of -> Mauritania
+Micronesia, Federated States of -> Micronesia, Fed. Sts.
+Moldova, Republic of -> Moldova
+Mozambique, Republic of -> Mozambique
+Nauru, Republic of -> Nauru
+Netherlands, The -> Netherlands
+North Macedonia, Republic of -> North Macedonia
+Palau, Republic of -> Palau
+Poland, Republic of -> Poland
+San Marino, Republic of -> San Marino
+São Tomé and Príncipe, Democratic Republic of -> Sao Tome and Principe
+Serbia, Republic of -> Serbia
+Slovenia, Republic of -> Slovenia
+Somalia -> Somalia, Fed. Rep.
+South Sudan, Republic of -> South Sudan
+Tajikistan, Republic of -> Tajikistan
+Tanzania, United Republic of -> Tanzania
+Timor-Leste, Democratic Republic of -> Timor-Leste
+Türkiye, Republic of -> Turkiye
+Uzbekistan, Republic of -> Uzbekistan
+Venezuela, República Bolivariana de -> Venezuela, RB
+Vietnam -> Viet Nam
+Yemen, Republic of -> Yemen, Rep.
