@@ -1,0 +1,130 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# TOC of Regressions and Visualizations
+1. [Libraries](#libraries)
+2. [Directory Setup](#dir)
+3. [Pooled OLS](#pooled)
+4. [Random Effects](#rnd_eff)
+5. [Fixed Effects + Time-Fixed Effects](#fxd_eff)
+6. [Hausman Test](#haus)
+
+# Libraries <a name = 'libraries'></a>
+```{r}
+library(stargazer)
+library(varhandle)
+library(plm)
+library(lmtest)
+library(sandwich)
+library(broom)
+library(rstudioapi)
+```
+
+# Directory Setup <a name = "dir"></a>
+
+```{r}
+current_path <- getSourceEditorContext()$path
+current_directory <- strsplit(current_path, '/')[[1]][1:length(strsplit(current_path, '/')[[1]]) - 1]
+current_directory <- paste(as.character(current_directory), collapse = '/')
+current_directory
+
+get_file_path <- function(path) {
+  return(paste(current_directory, path, sep="/"))
+}
+
+trade_and_the_se_df <- read.csv(get_file_path('trade_and_the_se.csv'))
+trade_and_the_se_df$tax_burden <- factor(trade_and_the_se_df$tax_burden) # For not having tax_burden as a factor
+trade_and_the_se_df$tax_burden <- unfactor(trade_and_the_se_df$tax_burden) 
+
+options(scipen=999)
+```
+
+# Preliminaries <a name = 'pre'></a>
+```{r}
+indep_vars <- c('trade_tax', 'applied_tariff_rate', 'exports_per_cap', 'imports_per_cap', 'wa_rca')
+control_vars <- c('composite_wgi', 'gdp_per_cap', 'income_tax', 'vat_tax', 'tax_burden')
+
+form_wo_controls <- se_size ~ trade_tax + applied_tariff_rate + exports_per_cap + imports_per_cap + wa_rca
+form_with_controls <- se_size ~ trade_tax + applied_tariff_rate + exports_per_cap + imports_per_cap + wa_rca + 
+                  composite_wgi + gdp_per_cap + income_tax + vat_tax + tax_burden
+```
+
+# Pooled OLS <a name = 'pooled'></a>
+```{r}
+# w/o control variables
+pooled_ols_wo_controls <- lm(form_wo_controls, data = trade_and_the_se_df)
+print('W/O CONTROLS')
+coeftest(pooled_ols_wo_controls, vcov = vcovHC(pooled_ols_wo_controls, type = "HC0"))
+# summary(pooled_ols_wo_controls)
+# stargazer(pooled_ols_wo_controls, type = "text")
+
+# w/ control variables
+pooled_ols_with_controls <- lm(form_wo_controls, data = trade_and_the_se_df)
+print('W CONTROLS')
+coeftest(pooled_ols_with_controls, vcov = vcovHC(pooled_ols_with_controls, type = "HC0"))
+# summary(pooled_ols_with_controls)
+# stargazer(pooled_ols_with_controls, type = "text")
+```
+
+# Random Effects <a name = 'rnd_eff'></a>
+```{r}
+random_effects_wo_controls <- plm(form_wo_controls, data = trade_and_the_se_df, model = 'random')
+coeftest(random_effects_wo_controls, vcov = vcovHC(random_effects_wo_controls, type = "HC0"))
+# summary(random_effects_wo_controls)
+# stargazer(random_effects_wo_controls, type = "text")
+
+
+random_effects_with_controls <- plm(form_with_controls, data = trade_and_the_se_df, model = 'random')
+coeftest(random_effects_with_controls, vcov = vcovHC(random_effects_with_controls, type = "HC0"))
+# summary(random_effects_with_controls)
+# stargazer(random_effects_with_controls, type = "text")
+```
+
+# Fixed Effects + Time-Fixed Effects <a name = 'fxd_eff'></a>
+```{r}
+fixed_effects_wo_controls <- plm(form_wo_controls, data = trade_and_the_se_df, model = 'within')
+coeftest(fixed_effects_wo_controls, vcov = vcovHC(fixed_effects_wo_controls, type = "HC0"))
+# summary(fixed_effects_wo_controls)
+# stargazer(fixed_effects_wo_controls, type = "text")
+
+fixed_effects_with_controls <- plm(form_with_controls, data = trade_and_the_se_df, model = 'within')
+coeftest(fixed_effects_with_controls, vcov = vcovHC(fixed_effects_with_controls, type = "HC0"))
+# summary(fixed_effects_with_controls)
+# stargazer(fixed_effects_with_controls, type = "text")
+```
+Time-Fixed Effects
+```{r}
+trade_and_the_se_df_with_year_dummies <- cbind(trade_and_the_se_df, as.data.frame.matrix(table(sequence(nrow(trade_and_the_se_df)), trade_and_the_se_df$year)))
+
+for (i in 14:ncol(trade_and_the_se_df_with_year_dummies)) {
+  colnames(trade_and_the_se_df_with_year_dummies)[i] <- paste('X', 2000 - 14 + i, sep = "")
+}
+
+year_dummies <- lapply(as.list(2001:2015), function(x) paste('X', x, sep = ""))
+time_dummies_no_controls_factors <- c(indep_vars, year_dummies)
+time_dummies_with_controls_factors <- c(indep_vars, control_vars, year_dummies)
+form_wo_controls_and_year_dummies <- as.formula(paste("se_size~", paste(time_dummies_no_controls_factors, collapse="+")))
+form_w_controls_and_year_dummies <- as.formula(paste("se_size~", paste(time_dummies_with_controls_factors, collapse="+")))
+
+time_fixed_effects_wo_controls <- plm(form_wo_controls_and_year_dummies, data = trade_and_the_se_df_with_year_dummies, model = 'within')
+coeftest(time_fixed_effects_wo_controls, vcov = vcovHC(time_fixed_effects_wo_controls, type = "HC0"))
+
+time_fixed_effects_w_controls <- plm(form_w_controls_and_year_dummies, data = trade_and_the_se_df_with_year_dummies, model = 'within')
+coeftest(time_fixed_effects_w_controls, vcov = vcovHC(time_fixed_effects_w_controls, type = "HC0"))
+```
+
+# Hausman Test <a name = 'haus'></a>
+```{r}
+phtest(fixed_effects_with_controls, random_effects_with_controls)
+```
+
+
+
+
+
+
+
+
+
