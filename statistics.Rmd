@@ -206,10 +206,21 @@ save_correlation_matrix = function(df, filename, ...) {
 ```
 
 ```{r}
-trade_and_the_se_df_numeric <- sapply(trade_and_the_se_df %>% select(-c('code', 'year')), as.numeric)
-# colnames(trade_and_the_se_df_numeric) <- c('')
+head(trade_and_the_se_df)
+typeof(trade_and_the_se_df)
+trade_and_the_se_df_numeric <- as.data.frame(sapply(trade_and_the_se_df %>% select(!c('code', 'year')), as.numeric))
+typeof(trade_and_the_se_df_numeric)
+trade_and_the_se_df_numeric <- trade_and_the_se_df_numeric %>% select(c('se_size', 'trade_tax', 'applied_tariff_rate'))#, exports_per_cap, imports_per_cap, wa_rca, composite_wgi, gdp_per_cap, income_tax, vat_tax, tax_burden)
+head(trade_and_the_se_df_numeric)
+```
+
+```{r}
+trade_and_the_se_df_numeric <- as.data.frame(sapply(trade_and_the_se_df %>% select(-c('code', 'year')), as.numeric))
+trade_and_the_se_df_numeric <- trade_and_the_se_df_numeric %>% select(se_size, trade_tax, applied_tariff_rate, exports_per_cap, imports_per_cap, wa_rca, composite_wgi, gdp_per_cap, income_tax, vat_tax, tax_burden)
+colnames(trade_and_the_se_df_numeric) <- c('SE Size', 'Trade Taxes', 'Applied Tariff Rate', 'Exports per Capita', 'Imports per Capita', 'Weighted Average RCA', 'Compsite WGI', 'GDP per Capita', 'Income Taxes', 'Taxes on G&S', 'Tax Burden')
 cor_data = cor(trade_and_the_se_df_numeric)
-corrplot(cor_data, method="number", number.cex = 0.7, tl.cex = 0.7, diag = F, tl.col = 'black')
+corrplot(cor_data, method="number", number.cex = 0.7, addCoef.col = 'black', tl.cex = 0.7, diag = F, tl.col = 'black')
+corrplot(cor_data, method="color", number.cex = 0.7, addCoef.col = 'black', tl.cex = 0.7, diag = F, tl.col = 'black', outline = 'black')
 correlation_matrix(trade_and_the_se_df)
 save_correlation_matrix(trade_and_the_se_df, filename = get_file_path('correlation_matrix_1'))
 # Put the one with significance codes in the appendix or side-by-side
@@ -270,3 +281,8 @@ f_stat
 probability_of_f_stat <- pf(f_stat, q, n - k - 1, lower.tail = F)
 print(glue('F_stat = {round(f_stat, 3)} ({round(probability_of_f_stat, 4) * 100}%); {round(sig_15, 4)}, {round(sig_10, 4)}, {round(sig_05, 4)}, {round(sig_01, 4)}'))
 ```
+
+
+
+
+
