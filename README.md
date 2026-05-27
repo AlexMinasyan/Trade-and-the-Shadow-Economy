@@ -1,0 +1,2 @@
+All of the code used in my project for "Evading and Avoiding Along Borders: How Trade Variables
+Affect the Size of Shadow Economies" by Alexander Minasyan for my Capstone: Honors Thesis at the American University of Armenia. 
