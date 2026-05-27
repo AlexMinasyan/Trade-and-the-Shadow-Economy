@@ -1,0 +1,918 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# Libraries
+
+```{r, results = 'hide', warnings = FALSE}
+library(plyr)
+library(tidyverse)
+library(stargazer)
+library(varhandle)
+library(plm)
+library(lmtest)
+library(sandwich)
+library(broom)
+library(rstudioapi)
+library(corrplot)
+library('Hmisc')
+library('car')
+library(glue)
+library(stringr)
+library(hrbrthemes)
+library(MASS)
+library(lawstat)
+library(rje)
+library(stringr)
+```
+
+# Directory Setup
+
+```{r}
+current_path <- getSourceEditorContext()$path
+current_directory <- strsplit(current_path, '/')[[1]][1:length(strsplit(current_path, '/')[[1]]) - 1]
+current_directory <- paste(as.character(current_directory), collapse = '/')
+current_directory
+
+get_file_path <- function(path) {
+  return(paste(current_directory, path, sep="/"))
+}
+
+trade_and_the_se_df <- read.csv(get_file_path('trade_and_the_se_2.csv'))
+trade_and_the_se_df$tax_burden <- factor(trade_and_the_se_df$tax_burden) # For not having tax_burden as a factor
+trade_and_the_se_df$tax_burden <- unfactor(trade_and_the_se_df$tax_burden)
+
+trade_and_the_se_df <- trade_and_the_se_df[!duplicated(trade_and_the_se_df), ] # Removing Duplicates
+trade_and_the_se_df <- trade_and_the_se_df %>% filter(applied_tariff_rate < 400)
+
+# trade_and_the_se_df[!unique(trade_and_the_se_df$country_year_combo), ]
+# trade_and_the_se_df_no_na <- trade_and_the_se_df[complete.cases(trade_and_the_se_df),] # Removing NAs
+
+options(scipen=999)
+```
+
+# Preliminaries
+
+I\(([a-zA-Z0-9\_]+\^\d{1})\)
+I\(([a-zA-Z0-9\_]+\ *\*\ *[a-zA-Z0-9\_]+)\)
+as\.factor\((year\))\d{4}
+```{r}
+str_detect('as.factor(year)2000', 'as\\.factor\\((year\\))\\d{4}')
+str_detect('I(applied_tariff_rate^2)', 'I\\(([a-zA-Z0-9\\_]+\\^\\d{1})\\)')
+str_detect('I(applied_tariff_rate * import_sanction)', 'I\\(([a-zA-Z0-9\\_]+\\ *\\*\\ *[a-zA-Z0-9\\_]+)\\)')
+str_extract('as.factor(year)2000', 'as\\.factor\\((year\\))\\d{4}')
+```
+```{r}
+indep_vars <- c('applied_tariff_rate', 'trade_tax', 'import_uvi', 'wa_rca', 'fdi', 'import_sanction', 'export_sanction', 'I(import_sanction * export_sanction)', 'I(applied_tariff_rate^2)')
+control_vars <- c('sales_tax', 'social_contributions', 'property_tax', 'income_tax', 'inflation', 'size_agri')
+years <- c('as.factor(year)2000', 'as.factor(year)2001')
+
+changes <- c('wa_rca -> Weighted Average RCA', 'import_uvi -> Import UVI', 'fdi -> FDI', 'size_agri -> Agriculatural Size')
+```
+
+```{r}
+extract_all_model_coefficients_ordered <- function(mdls) {
+  all_names <- c(names(as.list(mdls[1]$coefficients)))
+  for (mdl in mdls[1:length(mdls)]) {
+    all_names <- unique( c( all_names, names(as.list(mdl$coefficients)) ) )
+  }
+  
+  new_list <- c()
+  for (name in all_names) {
+    if (!(name %in% new_list)) {
+      all_relevant <- grep(name, all_names, fixed = T)
+      new_list <- c(new_list, all_names[all_relevant])
+    }
+  }
+  
+  new_list <- unique(new_list)
+  return( list(all_names, new_list) )
+}
+
+rearrange_order <- function(mdls) {
+  all_names <- c(names(as.list(mdls[1]$coefficients)))
+  for (mdl in mdls[1:length(mdls)]) {
+    all_names <- unique( c( all_names, names(as.list(mdl$coefficients)) ) )
+  }
+  
+  new_list <- c()
+  for (name in all_names) {
+    if (!(name %in% new_list)) {
+      all_relevant <- grep(name, all_names, fixed = T)
+      new_list <- c(new_list, all_names[all_relevant])
+    }
+  }
+  return (match(unique(new_list), all_names))
+}
+
+extract_all_model_coefficients_ordered(list(pooled_ols_wo_controls, pooled_ols_with_controls))
+```
+
+```{r}
+convert_var_to_words <- function(var) {
+  final <- gsub('_', ' ', var)
+  final <- str_to_title(final)
+  return (final)
+}
+year_regex <- 'as\\.factor\\((year\\))\\d{4}'
+nonlin_regex <- 'I\\(([a-zA-Z0-9\\_]+\\^\\d{1})\\)'
+inter_regex <- 'I\\(([a-zA-Z0-9\\_]+\\ *\\*\\ *[a-zA-Z0-9\\_]+)\\)'
+naming_correction_2 <- function(vars, exceptions) {
+  new_vars <- c()
+  for (var in vars) {
+    if ( grepl(var, paste(changes, collapse = ' ')) ) {
+      for (change in changes) {
+        if (str_split(change, ' -> ')[[1]][1] == var) {
+          new_vars <- c(new_vars, str_split(change, ' -> ')[[1]][2])
+        }
+      }
+    }
+    
+    else if (str_detect(var, year_regex)) {
+      new_vars <- c(new_vars, str_split(var, 'as\\.factor\\(year\\)')[[1]][2])
+    }
+    
+    else if (str_detect(var, nonlin_regex) | str_detect(var, inter_regex)) {
+      inner_portion <- str_split(var, c('\\(|\\)'))[[1]][2]
+      inner_portion <- convert_var_to_words(inner_portion)
+      inner_portion <- gsub('\\^', "$^$", inner_portion)
+      inner_portion <- gsub('\\*', "$\\\\times$", inner_portion)
+      new_vars <- c(new_vars, inner_portion)
+    }
+    
+    else {
+      new_vars <- c(new_vars, convert_var_to_words(var))
+    }
+  }
+  return(new_vars)
+}
+```
+
+```{r}
+return_standard_latex_2 <- function(models, ttl, dep.var.labels, covariate_exceptions, remove_time_fixed_effects_estimators = T, as.text = F, bottom_intercept = T) {
+  names <- extract_all_model_coefficients_ordered(models)
+  print(names)
+  
+  # order <- match(names[[2]], names[[1]]);
+  # print(order)
+
+  # intercept_location <- match(c('(Intercept)'), names[[2]])
+  # fixed_names <- if (bottom_intercept) c(names[[2]][-intercept_location], c('(Intercept)')) else names[[2]]
+  
+  covariate_labels <- naming_correction_2(names[[1]], covariate_exceptions)
+  print(covariate_labels)
+  omit <- if (remove_time_fixed_effects_estimators) 'year' else ''
+  print(omit)
+  type <- if (as.text) 'text' else 'latex'
+  print(type)
+  
+  return(
+    stargazer(models, se = lapply(models, se_robust), title = ttl, dep.var.labels = dep.var.labels, covariate.labels = covariate_labels, omit = omit, type = type, intercept.bottom = bottom_intercept, intercept.top = !(bottom_intercept))
+  )
+}
+```
+
+### Assisting Functions
+```{r}
+# Outputs the Heteroskedasticity Robust Statistics
+se_robust <- function(model)
+  coeftest(model, vcov = vcovHC(model, type = "HC0"))[, "Std. Error"]
+
+# Fixes the variable names (replaces all '_' w/ ' ', titles the text, and removes things like 'I(...)' or 'as.factor...')
+convert_var_to_words <- function(var) {
+  final <- gsub('_', ' ', var)
+  final <- str_to_title(final)
+  return (final)
+}
+naming_correction <- function(vars, exceptions) {
+
+  immune_list <- list()
+  for (change in exceptions) {
+    before <- str_split(change, ' -> ')[[1]][1]
+    if (before %in% as.list(vars)) {
+      immune_list[[length(immune_list) + 1]] = match(c(before), vars)
+      vars[match(c(before), vars)] <- str_split(change, ' -> ')[[1]][2]
+    }
+  }
+  
+  for (i in seq(1, length(vars))) {
+    if (i %in% immune_list) next
+    vars[i] <- str_to_title(gsub('_', ' ', vars[i]))
+    vars[i] <- gsub('I\\(', '', vars[i])
+    vars[i] <- gsub('\\)', '', vars[i])
+    vars[i] <- gsub('As.factor\\(Year', '', vars[i])
+  }
+  return(as.character(vars))
+}
+
+# Returns a Beautiful LaTeX Output
+return_standard_latex <- function(models, ttl, dep.var.labels, covariate_exceptions, remove_time_fixed_effects_estimators = TRUE, as.text = FALSE) {
+  print('Start')
+  all_names <- c()
+  for (mdl in models) {
+    if ( 'Constant' %in% names(as.list(mdl$coefficients)) | '(Intercept)' %in% names(as.list(mdl$coefficients)) ) {
+      all_names <- c(all_names, as.vector(names(as.list(mdl$coefficients)[-1])))
+    } else {
+      all_names <- c(all_names, as.vector(names(as.list(mdl$coefficients)) ))
+    }
+  }
+  print('Post Obtaining Names')
+  all_names_2 <- c()
+  for (name in unique(as.vector(all_names))) {
+    if (!(grepl('as.factor(year)', name))) {
+      all_names_2 <- c(all_names_2, c(name))
+    }
+  }
+  for (name in unique(as.vector(all_names))) {
+    if (grepl('as.factor(year)', name)) {
+      all_names_2 <- c(all_names_2, c(name))
+    }
+  }
+  print('Post Moving Factors to the Bottom')
+  
+  names <- naming_correction(unique(all_names_2), covariate_exceptions)
+  omit <- c()
+  if (remove_time_fixed_effects_estimators) {
+    omit <- c('year')
+    names <- (as.data.frame(names) %>% filter(!grepl('As.factor', names)))$names
+  }
+  print('Post Correcting Names / Omits')
+  
+  print(names)
+  print(omit)
+    
+  return(stargazer(models, se = lapply(models, se_robust),
+          summary = FALSE, align = TRUE, title = ttl, dep.var.labels = dep.var.labels, column.sep.width = "-15pt",
+          covariate.labels = names, omit = omit, type = if (as.text) 'text' else 'latex') 
+         )
+}
+
+# Returns a Regression Formula from a regressand and a list of regressors
+regression_formula <- function(dep_var, indep_vars) {
+  return( as.formula(paste(dep_var, paste(unlist(c(indep_vars), use.names = F), collapse = ' + '), sep = ' ~ ')) )
+}
+   
+# Update for Formulas so that the order is correct
+update_formula_cleanly <- function(og_formula, additions) {
+  split_form_parts <- as.character((og_formula))
+  indep_vars <- as.list(strsplit(split_form_parts[3], ' + ', fixed = T))
+  
+  all_terms <- c()
+  for (var in indep_vars[[1]]) {
+    findings <- as.list((as.data.frame(additions) %>% filter(grepl(var, additions)))$additions)
+    all_terms <- c(all_terms, c(var), as.vector(findings))
+  }
+  final_formula_str <- paste( split_form_parts[2], split_form_parts[1], paste(unlist(all_terms, use.names = F), collapse = ' + ') )
+  return(as.formula(final_formula_str))
+}
+
+# To Return all Individual Variable Regressions
+iterate_all_indiv <- function(dep_var, indep_vars, control_vars) {
+  list_of_formulas <- list(length(vec_power))
+  
+  counter <- 1
+  for (var in indep_vars) {
+    form <- regression_formula(dep_var, c(var, control_vars))
+    list_of_formulas[[counter]] = form; counter = counter + 1
+  }
+  return (list_of_formulas)
+}
+
+# To Return all Possible Model Specs
+iterate_all_model_specs <- function(og_formula, set_of_specs) {
+  vec_power <- powerSet(set_of_specs); list_of_formulas <- list(length(vec_power))
+  
+  counter <- 1
+  for (set in vec_power) {
+    form <- update_formula_cleanly(og_formula, set)
+    list_of_formulas[[counter]] = form; counter = counter + 1
+  }
+  return (list_of_formulas)
+}
+
+test_iv <- function(instrument, instrumented_var, other_vars, data) {
+  formula <- as.formula(glue('{instrumented_var} ~ {instrument} + {paste(unlist(other_vars, use.names = F), collapse = "+")}'))
+  print(formula)
+  summary(plm(formula, data = data, model = 'within'))
+}
+```
+
+### Regression Formulas
+```{r}
+dep_var <- 'se_size'
+indep_vars <- c('applied_tariff_rate', 'trade_tax', 'import_uvi', 'wa_rca', 'fdi', 'import_sanction', 'export_sanction', 'I(import_sanction * export_sanction)')
+control_vars <- c('sales_tax', 'social_contributions', 'property_tax', 'income_tax', 'inflation', 'size_agri')
+changes <- c('wa_rca -> Weighted Average RCA', 'import_uvi -> Import UVI', 'fdi -> FDI', 'cpi -> CPI', 'size_agri -> Agricultural Size')
+
+form_wo_controls = regression_formula(dep_var, indep_vars)
+form_with_controls = regression_formula(dep_var, c(indep_vars, control_vars))
+form_wo_controls_w_time = regression_formula(dep_var, c(indep_vars, 'as.factor(year)'))
+form_with_controls_w_time = regression_formula(dep_var, c(indep_vars, control_vars, 'as.factor(year)'))
+```
+
+### IV Implementation
+```{r}
+test_iv('import_uvi', 'applied_tariff_rate', c(indep_vars, control_vars)[! c(indep_vars, control_vars) %in% c('import_uvi', 'applied_tariff_rate')], data = trade_and_the_se_df)
+# summary(res)
+```
+
+# Pooled OLS
+
+```{r}
+# w/o control variables
+pooled_ols_wo_controls <- lm(form_wo_controls, data = trade_and_the_se_df)
+
+# w/ control variables
+pooled_ols_with_controls <- lm(form_with_controls, data = trade_and_the_se_df)
+
+return_standard_latex_2(list(pooled_ols_wo_controls, pooled_ols_with_controls), 'Results', dep.var.labels = c('SE Size'), changes, as.text = T, bottom_intercept = F)
+```
+
+# Random Effects
+
+```{r}
+# w/o control variables
+random_effects_wo_controls <- plm(form_wo_controls, data = trade_and_the_se_df, model = 'random')
+
+# w/ control variables
+random_effects_with_controls <- plm(form_with_controls, data = trade_and_the_se_df, model = 'random')
+
+# return_standard_latex(list(random_effects_wo_controls, random_effects_with_controls), 'Results', c('SE_Size'), custom_changes <- c('wa_rca -> Weighted Average RCA', 'import_uvi_growth_rate -> Import UVI Growth Rate', 'cpi -> CPI', 'size_agri -> Agricultural Size'), as.text = T)
+```
+
+# Fixed Effects + Time-Fixed Effects
+
+Country-Fixed Effects
+```{r}
+# w/o control variables
+fixed_effects_wo_controls <- plm(form_wo_controls, data = trade_and_the_se_df, model = 'within')
+
+# w/ control variables
+fixed_effects_with_controls <- plm(form_with_controls, data = trade_and_the_se_df, model = 'within')
+
+#return_standard_latex(list(fixed_effects_wo_controls, fixed_effects_with_controls), 'Results', c('SE_Size'), c('wa_rca -> Weighted Average RCA', 'import_uvi_growth_rate -> Import UVI Growth Rate', 'cpi -> CPI', 'size_agri -> Agricultural Size'), as.text = T)
+
+# Recovering the Intercept
+within_intercept(fixed_effects_wo_controls)
+within_intercept(fixed_effects_with_controls)
+# The Country Fixed Effects Terms
+# summary(fixef(fixed_effects_with_controls))
+```
+
+Time-Fixed Effects
+```{r}
+# w/o control variables
+all_time_fixed_formulas <- iterate_all_indiv('se_size', indep_vars, control_vars)
+all_time_fixed_formulas <- append(all_time_fixed_formulas, form_with_controls_w_time)
+all_time_fixed_formulas
+
+list_of_time_fixed_effects_regressions <- list(length(all_time_fixed_formulas)); counter <- 1
+for (form in all_time_fixed_formulas) {
+  list_of_time_fixed_effects_regressions[[counter]] <- plm(form, data = trade_and_the_se_df, model = 'within')
+  counter <- counter + 1
+}
+
+time_fixed_effects_wo_controls <- plm(form_wo_controls_w_time, data = trade_and_the_se_df, model = 'within')
+
+# w/ control variables
+time_fixed_effects_with_controls <- plm(form_with_controls_w_time, data = trade_and_the_se_df, model = 'within')
+# list_of_time_fixed_effects_regressions <- append(list_of_time_fixed_effects_regressions, time_fixed_effects_with_controls)
+
+# return_standard_latex_2(list_of_time_fixed_effects_regressions, dep.var.labels = c('SE Size'), changes, as.text = F, bottom_intercept = F)
+stargazer(list_of_time_fixed_effects_regressions, se = lapply(list_of_time_fixed_effects_regressions, se_robust), type = 'latex', omit = c('year'))
+# return_standard_latex(list(time_fixed_effects_wo_controls, time_fixed_effects_with_controls), 'Results', c('SE_Size'), custom_changes <- c('wa_rca -> Weighted Average RCA', 'import_uvi_growth_rate -> Import UVI Growth Rate', 'cpi -> CPI', 'size_agri -> Agricultural Size', 'fdi' -> 'FDI'), as.text = T, remove_time_fixed_effects_estimators = T)
+
+# Recovering the Intercept
+# within_intercept(time_fixed_effects_wo_controls)
+# within_intercept(time_fixed_effects_with_controls)
+```
+
+# Outputting Basic Results
+
+```{r}
+models_basic <- list(pooled_ols_wo_controls, pooled_ols_with_controls, random_effects_wo_controls, random_effects_with_controls, fixed_effects_wo_controls, fixed_effects_with_controls) #, time_fixed_effects_wo_controls, time_fixed_effects_with_controls)
+
+return_standard_latex_2(models_basic, 'Results', dep.var.labels = c('SE Size'), changes, as.text = F, bottom_intercept = F)
+# return_standard_latex_2(models_basic, 'Results', c('SE_Size'), changes, as.text = F)
+```
+
+# Hausman Test <a name = 'haus'></a>
+
+```{r}
+phtest(time_fixed_effects_with_controls, random_effects_with_controls)
+```
+
+Sales Tax, Social Contributions, and Income Taxes are jointly significant
+
+```{r}
+linearHypothesis(time_fixed_effects_with_controls, c("trade_tax = 0", "property_tax = 0", "social_contributions = 0", "income_tax = 0"), white.adjust = "hc1")
+linearHypothesis(time_fixed_effects_with_controls, c("import_uvi = 0", "inflation = 0", "wa_rca = 0"), white.adjust = "hc1")
+linearHypothesis(time_fixed_effects_with_controls, c("import_sanction = 0", "export_sanction = 0", "I(import_sanction * export_sanction) = 0"), white.adjust = "hc1")
+
+cor.test(trade_and_the_se_df$gov_eff, trade_and_the_se_df$property_tax, method = "pearson")
+cor.test(trade_and_the_se_df$gov_eff, trade_and_the_se_df$trade_tax, method = "pearson")
+cor.test(trade_and_the_se_df$gov_eff, trade_and_the_se_df$social_contributions, method = "pearson")
+cor.test(trade_and_the_se_df$gov_eff, trade_and_the_se_df$income_tax, method = "pearson")
+cor.test(trade_and_the_se_df$gov_eff, trade_and_the_se_df$sales_tax, method = "pearson")
+```
+
+# Multicollinearity <a name = 'multicollinearity'></a> {#multicollinearity}
+
+Correlation Matrix
+
+Function by Paul van der Laken\
+<https://www.r-bloggers.com/2020/07/create-a-publication-ready-correlation-matrix-with-significance-levels-in-r>
+
+```{r}
+correlation_matrix <- function(df, 
+                               type = "pearson",
+                               digits = 3, 
+                               decimal.mark = ".",
+                               use = "all", 
+                               show_significance = TRUE, 
+                               replace_diagonal = FALSE, 
+                               replacement = ""){
+  
+  # check arguments
+  stopifnot({
+    is.numeric(digits)
+    digits >= 0
+    use %in% c("all", "upper", "lower")
+    is.logical(replace_diagonal)
+    is.logical(show_significance)
+    is.character(replacement)
+  })
+  # we need the Hmisc package for this
+  require(Hmisc)
+  
+  # retain only numeric and boolean columns
+  isNumericOrBoolean = vapply(df, function(x) is.numeric(x) | is.logical(x), logical(1))
+  if (sum(!isNumericOrBoolean) > 0) {
+    cat('Dropping non-numeric/-boolean column(s):', paste(names(isNumericOrBoolean)[!isNumericOrBoolean], collapse = ', '), '\n\n')
+  }
+  df = df[isNumericOrBoolean]
+  
+  # transform input data frame to matrix
+  x <- as.matrix(df)
+  
+  # run correlation analysis using Hmisc package
+  correlation_matrix <- Hmisc::rcorr(x, type = )
+  R <- correlation_matrix$r # Matrix of correlation coeficients
+  p <- correlation_matrix$P # Matrix of p-value 
+  
+  # transform correlations to specific character format
+  Rformatted = formatC(R, format = 'f', digits = digits, decimal.mark = decimal.mark)
+  
+  # if there are any negative numbers, we want to put a space before the positives to align all
+  if (sum(R < 0) > 0) {
+    Rformatted = ifelse(R > 0, paste0(' ', Rformatted), Rformatted)
+  }
+  
+  # add significance levels if desired
+  if (show_significance) {
+    # define notions for significance levels; spacing is important.
+    stars <- ifelse(is.na(p), "   ", ifelse(p < .001, "***", ifelse(p < .01, "** ", ifelse(p < .05, "*  ", "   "))))
+    Rformatted = paste0(Rformatted, stars)
+  }
+  # build a new matrix that includes the formatted correlations and their significance stars
+  Rnew <- matrix(Rformatted, ncol = ncol(x))
+  rownames(Rnew) <- colnames(x)
+  colnames(Rnew) <- paste(colnames(x), "", sep =" ")
+  
+  # replace undesired values
+  if (use == 'upper') {
+    Rnew[lower.tri(Rnew, diag = replace_diagonal)] <- replacement
+  } else if (use == 'lower') {
+    Rnew[upper.tri(Rnew, diag = replace_diagonal)] <- replacement
+  } else if (replace_diagonal) {
+    diag(Rnew) <- replacement
+  }
+  
+  return(Rnew)
+}
+
+# save_correlation_matrix = function(df, filename, ...) {
+#   write.csv2(correlation_matrix(df, ...), file = filename)
+# }
+
+generate_beautiful_correlation_table <- function(df, exclusions, custom_renames) {
+  df_numeric <- as.data.frame(sapply(df %>% select(!exclusions), as.numeric))
+  df_numeric <- df_numeric[complete.cases(df_numeric),]
+  colnames(df_numeric) <- naming_correction(colnames(df_numeric), custom_renames)
+  
+  cor_data = cor(df_numeric)
+  # corrplot(cor_data, method="number", number.cex = 0.7, addCoef.col = 'black', tl.cex = 0.7, diag = F, tl.col = 'black')
+  
+  pdf('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/LaTeX/Figures/color_coded_correlation.pdf')
+    corrplot(cor_data, method="color", number.cex = 0.55, addCoef.col = 'black', tl.cex = 0.7, diag = F, tl.col = 'black', outline = 'black')
+  dev.off
+  
+  # return (corrplot(cor_data, method="color", number.cex = 0.55, addCoef.col = 'black', tl.cex = 0.7, diag = F, tl.col = 'black', outline = 'black'))
+}
+```
+
+```{r}
+generate_beautiful_correlation_table(trade_and_the_se_df, exclusions = c('country', 'year', 'tax_burden', 'gov_eff', 'rule_law', 'reg_qua', 'cont_corr', 'import_uvi_growth_rate', 'cpi'), custom_renames = c('se_size -> SE Size', 'wa_rca -> Weighted Average RCA', 'import_uvi -> Import UVI', 'cpi -> CPI', 'size_agri -> Agricultural Size', 'fdi -> FDI'))
+
+correlation_matrix(trade_and_the_se_df)
+# save_correlation_matrix(trade_and_the_se_df, filename = get_file_path('correlation_matrix_1'))
+# Put the one with significance codes in the appendix or side-by-side
+```
+
+VIFs
+
+```{r}
+vif_values <- vif(lm(form_with_controls, data = trade_and_the_se_df))
+vif_values
+```
+
+# Plots and Visuals
+
+```{r}
+quantile(trade_and_the_se_df_no_na$wa_rca, c(0.80, 0.85, 0.90), na.rm = TRUE)
+sum(trade_and_the_se_df_no_na$wa_rca <= 3.848) / length(trade_and_the_se_df_no_na$wa_rca)
+```
+
+### Functional Form Visuals and Testing
+```{r}
+plot_comparison_with_functional_forms <- function(df, x_var, y_var) {
+  names <- naming_correction(list(x_var, y_var), c())
+  
+  plot <- ggplot(data = df, aes_string(x = x_var, y = y_var)) + 
+  geom_point() + geom_smooth(method = lm, formula = y~poly(x, 1), col = "red", se = FALSE) + geom_smooth(method = lm, formula = y~poly(x, 2), col = "blue", se = FALSE) + geom_smooth(method = lm, formula = y~poly(x, 3), col = "green", se = FALSE) +
+  geom_vline(aes(xintercept = mean(df[[x_var]], na.rm = TRUE)), linetype = 4, color = "red") + 
+  labs(title = glue('{names[1]} vs. {names[2]}'), x = names[1], y = names[2])
+
+  testing_model_linear <- lm(as.formula(glue('{y_var} ~ {x_var}')), data = df)
+  testing_model_quadratic <- lm(as.formula(glue('{y_var} ~ {x_var} + I({x_var}^2)')), data = df)
+  testing_model_cubic <- lm(as.formula(glue('{y_var} ~ {x_var} + I({x_var}^2) + I({x_var}^3)')), data = df)
+
+  degree_counter <- 1
+  for (model in list(testing_model_linear, testing_model_quadratic, testing_model_cubic)) {
+    mse <- mean(summary(model)$residuals ^ 2)
+    print(glue('MSE of Poly w/ Degree {degree_counter}: {mse}'))
+
+    degree_counter <- degree_counter + 1
+  }
+  return(plot)
+}
+```
+
+```{r}
+plot_comparison_with_functional_forms(trade_and_the_se_df, 'applied_tariff_rate', 'se_size')
+```
+
+```{r}
+trade_and_the_se_df_taxes <- trade_and_the_se_df %>% 
+  dplyr::select(c('se_size', 'year', 'trade_tax', 'sales_tax', 'social_contributions', 'property_tax', 'income_tax')) %>% drop_na()
+colnames(trade_and_the_se_df_taxes) <- c('se_size', 'year', 'Trade Tax', 'Sales Tax', 'Social Contributions', 'Property Tax', 'Income Tax')
+trade_and_the_se_df_taxes
+trade_and_the_se_df_taxes_longer <- pivot_longer(trade_and_the_se_df_taxes, cols = c('Trade Tax', 'Sales Tax', 'Social Contributions', 'Property Tax', 'Income Tax'), names_to = 'type', values_to = 'value')
+trade_and_the_se_df_taxes_longer
+```
+
+```{r}
+group.colors = c('#738290', '#44344F', '#5AFF15', '#F2AF29', '#EF233C')
+group.fills = c('black', 'black', 'black', 'black', 'black')
+trade_and_the_se_df_taxes_longer %>% 
+  ggplot(aes(value, se_size, color = type)) + 
+  geom_point(alpha = 0.15) + geom_smooth(aes(fill = type), method = 'lm', formula = y~poly(x, 2), se = F) + theme_classic() + 
+  scale_fill_manual(values = group.fills) + scale_color_manual(values = group.colors) + 
+  labs(x = 'Revenue as % of GDP', y = 'SE Size', fill = 'Tax', color = 'Tax')
+```
+
+### Line Graph of Average SE Values
+```{r}
+trade_and_the_se_df %>% group_by(year) %>% summarise(se_mean = mean(se_size)) %>% 
+  ggplot(data = ., aes(x = year, y = se_mean)) + 
+  geom_smooth(method = lm, formula = y ~ x, color = '#B0FC38', se = F, alpha = 0.4, linewidth = 0.7) +
+  geom_point(color = '#028A0F', size = 3) + geom_line(color = '#028A0F', linewidth = 1, alpha = 0.7, linetype = 2) + ylim(22, 31) + 
+  theme_classic() + labs(x = 'Year', y = 'Average SE Size')
+```
+
+# Nonlinearities
+
+### Standard
+```{r}
+# nonlinearities = c('applied_tariff_rate_2', 'applied_tariff_rate_3', 'trade_tax.2')
+nonlinearities = c('I(applied_tariff_rate^2)', 'I(trade_tax^2)') #, 'I(income_tax^2)', 'I(property_tax^2)', 'I(sales_tax^2)', 'I(social_contributions^2)')
+nonlinearity_formulas <- iterate_all_model_specs(form_with_controls_w_time, nonlinearities)
+
+list_of_nonlinearity_regressions <- list(length(nonlinearity_formulas)); counter <- 1
+for (form in nonlinearity_formulas) {
+  list_of_nonlinearity_regressions[[counter]] <- plm(form, data = trade_and_the_se_df, model = 'within')
+  counter <- counter + 1
+}
+
+# return_standard_latex_2(list_of_nonlinearity_regressions, dep.var.labels = c('SE Size'), changes, as.text = T, bottom_intercept = F)
+# stargazer(list_of_nonlinearity_regressions, se = lapply(list_of_nonlinearity_regressions, se_robust), type = 'latex', omit = c('year'))
+# return_standard_latex(list(time_fixed_effects_with_controls_with_applied_tariff_nonlinearities, time_fixed_effects_with_controls_with_nonlinearities), 'Results', c('SE Size'), custom_changes <- c('wa_rca -> Weighted Average RCA', 'import_uvi -> Import UVI', 'size_agri -> Agricultural Size', 'I(applied_tariff_rate^2) -> Applied Tariff Rate\\^2', 'I(trade_tax^2) -> Trade Tax\\^2', 'I(income_tax^2) -> Income Tax\\^2', 'I(property_tax^2) -> Property Tax\\^2', 'I(sales_tax^2) -> Sales Tax\\^2', 'I(social_contributions^2) -> Social Contributions\\^2'), as.text = T, remove_time_fixed_effects_estimators = T)
+
+# within_intercept(time_fixed_effects_with_controls_with_applied_tariff_nonlinearities)
+# within_intercept(time_fixed_effects_with_controls_with_nonlinearities)
+```
+
+### Testing for Joint Significance
+```{r}
+linearHypothesis(time_fixed_effects_with_controls_with_nonlinearities, c("applied_tariff_rate = 0", "I(applied_tariff_rate^2) = 0"), white.adjust = "HC0")
+linearHypothesis(time_fixed_effects_with_controls_with_nonlinearities, c("trade_tax = 0", "I(trade_tax^2) = 0"), white.adjust = "HC0")
+linearHypothesis(time_fixed_effects_with_controls_with_nonlinearities, c("income_tax = 0", "I(income_tax^2) = 0"), white.adjust = "hc1")
+linearHypothesis(time_fixed_effects_with_controls_with_nonlinearities, c("property_tax = 0", "I(property_tax^2) = 0"), white.adjust = "hc1")
+linearHypothesis(time_fixed_effects_with_controls_with_nonlinearities, c("sales_tax = 0", "I(sales_tax^2) = 0"), white.adjust = "hc1")
+linearHypothesis(time_fixed_effects_with_controls_with_nonlinearities, c("social_contributions = 0", "I(social_contributions^2) = 0"), white.adjust = "hc1")
+```
+
+### Huber regression
+```{r}
+trade_df_huber <- data.frame(trade_and_the_se_df)
+trade_df_huber <- trade_df_huber %>% drop_na()
+
+# demean <- colwise(function(x) if(is.numeric(x)) x - mean(x) else x)
+# trade_df_huber <- ddply(trade_df_huber, demean) %>% dplyr::select(-c('gov_eff', 'rule_law', 'reg_qua', 'cont_corr', 'tax_burden', 'import_uvi_growth_rate'))
+# trade_df_huber
+
+# trade_df_huber <- trade_df_huber %>% 
+#   dplyr::select(-c('gov_eff', 'rule_law', 'reg_qua', 'cont_corr', 'tax_burden', 'import_uvi_growth_rate'))
+#   mutate_each(funs(.-mean(.)), 2:(ncol(trade_df_huber) - 6))
+# trade_df_huber
+cols <- ncol(trade_df_huber)
+trade_df_huber[2:cols] <- trade_df_huber[2:cols] - colMeans(trade_df_huber[2:cols])[col(trade_df_huber[2:cols])]
+trade_df_huber <- trade_df_huber %>% dplyr::select(-c('gov_eff', 'rule_law', 'reg_qua', 'cont_corr', 'tax_burden', 'import_uvi_growth_rate'))
+trade_df_huber
+
+# print(unique(trade_and_the_se_df$year) - mean(trade_and_the_se_df$year))
+# print(unique(trade_df_huber$year))
+
+huber <- rlm(form_with_controls_w_time_w_nln, data = trade_df_huber)
+# round(coeftest(huber, vcov = vcovHC(huber, type = "HC0")), 4)
+summary(huber)
+huber_df <- tidy(huber)
+huber_df <- huber_df %>% 
+  mutate(p_prob = pt(-abs(statistic), df = nrow(trade_and_the_se_df) - 1))
+huber_df[,2] <-round(huber_df[,2], 4)
+huber_df[,3] <-round(huber_df[,3], 3)
+huber_df
+
+# Computing the model statistics
+N = nrow(trade_df_huber)
+vars = nrow(huber_df %>% filter(!grepl('as.factor', term)) %>% filter(term != '(Intercept)'))
+print(glue('Observations: {N}'))
+SSR = sum(huber$residuals^2)
+SST = sum((trade_df_huber$se_size - mean(trade_df_huber$se_size))^2)
+R.squared = 1 - SSR / SST
+adjusted.R.squared = 1 - (SSR / (N - vars - 1)) / (SST / (N - 1))
+F.stat = (R.squared / vars) / ((1 - R.squared) / (N - vars - 1))
+print(glue('R-squared: {R.squared}'))
+print(glue('Adjusted R-squared: {adjusted.R.squared}'))
+print(glue('F-stat: {F.stat}'))
+```
+```{r}
+
+```
+
+### Huber - Testing for Joint Significance
+```{r}
+linearHypothesis(huber, c("applied_tariff_rate = 0", "I(applied_tariff_rate^2) = 0"), white.adjust = "HC0")
+linearHypothesis(huber, c("trade_tax = 0", "I(trade_tax^2) = 0"), white.adjust = "HC0")
+linearHypothesis(huber, c("income_tax = 0", "I(income_tax^2) = 0"), white.adjust = "hc1")
+linearHypothesis(huber, c("property_tax = 0", "I(property_tax^2) = 0"), white.adjust = "hc1")
+linearHypothesis(huber, c("sales_tax = 0", "I(sales_tax^2) = 0"), white.adjust = "hc1")
+linearHypothesis(huber, c("social_contributions = 0", "I(social_contributions^2) = 0"), white.adjust = "hc1")
+```
+
+Testing Linear Combinations
+```{r}
+linearHypothesis(time_fixed_effects_with_controls_with_nonlinearities, c("trade_tax - income_tax = 0", "I(trade_tax^2) - I(income_tax^2) = 0"), white.adjust = "hc1")
+linearHypothesis(time_fixed_effects_with_controls_with_nonlinearities, c("trade_tax - property_tax = 0", "I(trade_tax^2) - I(property_tax^2) = 0"), white.adjust = "hc1")
+linearHypothesis(time_fixed_effects_with_controls_with_nonlinearities, c("trade_tax - sales_tax = 0", "I(trade_tax^2) - I(sales_tax^2) = 0"), white.adjust = "hc1")
+linearHypothesis(time_fixed_effects_with_controls_with_nonlinearities, c("trade_tax - social_contributions = 0", "I(trade_tax^2) - I(social_contributions^2) = 0"), white.adjust = "hc1")
+```
+
+```{r}
+ecdf((trade_and_the_se_df %>% drop_na())$trade_tax)(5.23729)
+mean((trade_and_the_se_df %>% drop_na())$trade_tax)
+```
+```{r}
+View(trade_and_the_se_df)
+```
+
+# Interactions
+
+```{r}
+interactions <- c('I(applied_tariff_rate * import_sanction)', 'I(wa_rca * size_agri)')
+
+tax_interactions = c()
+tax_controls = c('income_tax', 'property_tax', 'social_contributions', 'sales_tax')
+for (tax in tax_controls) {
+  tax_interactions <- append(tax_interactions, glue('I(trade_tax * {tax})'))
+}
+interactions <- c(interactions)#, tax_interactions)
+
+list_of_interaction_forms <- iterate_all_model_specs(form_with_controls_w_time, interactions)
+list_of_interaction_regressions <- list(length(list_of_interaction_forms)); counter <- 1
+for (form in list_of_interaction_forms) {
+  list_of_interaction_regressions[[counter]] <- plm(form, data = trade_and_the_se_df, model = 'within')
+  counter <- counter + 1
+}
+
+form_with_controls_w_time_w_interactions <- update_formula_cleanly(form_with_controls_w_time, interactions)
+  # update(form_with_controls_w_time_w_nln, reformulate(c('.', interactions)))
+time_fixed_effects_with_controls_with_interactions <- plm(form_with_controls_w_time_w_interactions, data = trade_and_the_se_df, model = 'within')
+
+stargazer(list_of_interaction_regressions, se = lapply(list_of_interaction_regressions, se_robust), type = 'latex', omit = 'year')
+# return_standard_latex(list(time_fixed_effects_with_controls_with_interactions), 'Results', c('SE_Size'), custom_changes <- c('wa_rca -> Weighted Average RCA', 'import_uvi_growth_rate -> Import UVI Growth Rate', 'cpi -> CPI', 'size_agri -> Agricultural Size', 'I(applied_tariff_rate^2) -> Applied Tariff Rate\\^2', 'I(trade_tax^2) -> Trade Tax\\^2', 'I(wa_rca^2) -> Weighted Average RCA\\^2', 'I(income_tax^2) -> Income Tax\\^2', 'I(property_tax^2) -> Property Tax\\^2', 'I(sales_tax^2) -> Sales Tax\\^2', 'I(social_contributions^2) -> Social Contributions\\^2'), as.text = T, remove_time_fixed_effects_estimators = T)
+
+# within_intercept(time_fixed_effects_with_controls_with_interactions)
+```
+
+### Testing for Joint Significance
+```{r}
+linearHypothesis(time_fixed_effects_with_controls_with_nonlinearities_with_interactions, c("I(trade_tax * income_tax) = 0", "I(trade_tax * social_contributions) = 0", "I(trade_tax * sales_tax) = 0"), white.adjust = "hc1")
+linearHypothesis(time_fixed_effects_with_controls_with_nonlinearities_with_interactions, c("income_tax = 0", "I(trade_tax * income_tax) = 0"), white.adjust = "hc1")
+linearHypothesis(time_fixed_effects_with_controls_with_nonlinearities_with_interactions, c("social_contributions = 0", "I(trade_tax * social_contributions) = 0"), white.adjust = "hc1")
+linearHypothesis(time_fixed_effects_with_controls_with_nonlinearities_with_interactions, c("sales_tax = 0", "I(trade_tax * sales_tax) = 0"), white.adjust = "hc1")
+```
+
+### APEs
+```{r}
+mean(trade)
+```
+
+# IV Estimation
+```{r}
+corr_test <- trade_and_the_se_df %>% select(trade_tax, import_uvi)
+corr_test <- corr_test[complete.cases(corr_test),]
+print(corr_test)
+cor(corr_test$import_uvi, corr_test$trade_tax)
+
+print(form_with_controls_w_time)
+lin <- plm(applied_tariff_rate ~ trade_tax + import_uvi + wa_rca + income_tax + property_tax + sales_tax + social_contributions + cpi + size_agri, data = trade_and_the_se_df)
+summary(lin)
+```
+
+# Testing Quality Prediction
+```{r}
+testing_2015 <- read_csv('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/Quality Estimates/testing_gravity.csv')
+testing_2015 <- testing_2015 %>% 
+  select(-c('ln_cifvalue', 'ln_unit_values', 'ln_reporter_income', 'ln_partner_income', 'ln_distw_arithmetic', 'ln_unit_values:ln_reporter_income', 'ln_reporter_income:ln_partner_income', 'ln_distw_arithmetic:ln_reporter_income')) %>% 
+  mutate(unit_values_lag = Lag(unit_values, shift = 1))
+
+testing_fe <- plm(log(cifvalue) ~ distw_arithmetic + contig + comcol + comlang_off + col_dep + col_dep_ever + sibling_ever + log(unit_values):log(gdp_per_cap_ppp_reporter) + log(gdp_per_cap_ppp_partner):log(gdp_per_cap_ppp_reporter) + log(distw_arithmetic):log(gdp_per_cap_ppp_reporter) | . - log(unit_values_lag):log(gdp_per_cap_ppp_reporter), data = testing_2015, index = c('reporterISO', 'partnerISO'), model = 'within')
+coeftest(testing_fe, vcov = vcovHC(testing_fe, type = "HC0"))
+
+a <- 6.1611 / 100
+b <- 6.4899 / 100
+c <- -1.0258 / 100
+
+testing_2015 <- testing_2015 %>% 
+  mutate(quality_estimate = a * log(unit_values) + b * log(gdp_per_cap_ppp_partner) + c * log(distw_arithmetic))
+View(testing_2015)
+```
+
+
+# Copula Correction
+```{r}
+copula_trade_df <- data.frame(trade_and_the_se_df)
+colnames(copula_trade_df)
+```
+
+### Testing Assumptions
+##### Normality of Errors
+```{r}
+# time_fixed_effects_with_controls$residuals
+# ggplot2(time_fixed_effects_with_controls$residuals, aes())
+res <- time_fixed_effects_with_controls$residuals
+res_df <- data.frame(time_fixed_effects_with_controls$residuals)
+
+# qqnorm(res)
+ggplot(res_df, aes(x = time_fixed_effects_with_controls.residuals)) + 
+  geom_density(fill = '#E2342B', color = '#B90E0A', alpha=0.6) + theme_classic() + labs(title = "", x = "Residual Error (E)", y = "Density")
+
+ggplot(res_df) + 
+  stat_qq(aes(sample = time_fixed_effects_with_controls.residuals), col = '#0492C2') + stat_qq_line(aes(sample = time_fixed_effects_with_controls.residuals), col = '#1338BE') + theme_classic()
+
+shapiro.test(res)
+symmetry.test(res, option = "MGG")
+```
+
+##### Nonnormality of Regressors
+```{r}
+tax_vars <- c('applied_tariff_rate', 'trade_tax', 'income_tax', 'social_contributions', 'sales_tax', 'property_tax')
+no_na <- trade_and_the_se_df %>% dplyr::select(all_of(tax_vars)) %>% drop_na()
+for (var in tax_vars) {
+  print(var)
+  print(shapiro.test(as.numeric(no_na[[var]])))
+}
+```
+
+```{r}
+View(trade_and_the_se_df)
+```
+
+```{r}
+copula_trade_df <- data.frame(trade_and_the_se_df)
+copula_trade_df <- copula_trade_df %>% drop_na()
+# copula_trade_df
+# copula_trade_df_2 <- demean(copula_trade_df, select = c('se_size', 'applied_tariff_rate'), group = country)
+# copula_trade_df_2
+
+# demean <- colwise(function(x) if(is.numeric(x)) x - mean(x) else x)
+# copula_trade_df_2 <- ddply(copula_trade_df, .(country), demean) %>% dplyr::select(-c('export_sanction', 'import_sanction', 'gov_eff', 'rule_law', 'reg_qua', 'cont_corr', 'tax_burden', 'import_uvi_growth_rate'))
+copula_trade_df_2 <- data.frame(copula_trade_df)
+copula_trade_df_2[2:cols] <- copula_trade_df_2[2:cols] - colMeans(copula_trade_df_2[2:cols])[col(copula_trade_df_2[2:cols])]
+copula_trade_df_2
+```
+
+### Copula Transformation
+```{r}
+qian_xie_copula_transform <- function(x) {
+  # print(glue("{max(x)} - {rank(x) / length(x)}"))
+  if (x < max(x)) {
+    return ( qnorm(rank(x) / length(x), 0, 1)[[1]] )
+  } else {
+    return ( qnorm(rank(x) / (length(x) + 1), 0, 1)[[1]] )
+  }
+}
+v_qian_xie_copula_transform <- Vectorize(qian_xie_copula_transform)
+```
+
+```{r}
+copula_trade_df_copulas <- copula_trade_df_2 %>% 
+  mutate_at(c(seq( 3, length(colnames(copula_trade_df_2)) )), ~ ifelse( .x < max(.x), qnorm(rank(.x) / length(.x), 0, 1), qnorm(length(.x) / (length(.x) + 1), 0, 1)) )
+
+correction_applied_tariff_rate <- lm(applied_tariff_rate ~ wa_rca + import_uvi + cpi + size_agri, copula_trade_df_copulas)$residuals
+correction_trade_tax <- lm(trade_tax ~ wa_rca + fdi + import_uvi + inflation + size_agri, copula_trade_df_copulas)$residuals
+correction_sales_tax <- lm(sales_tax ~ wa_rca + fdi +  import_uvi + inflation + size_agri, copula_trade_df_copulas)$residuals
+correction_social_contributions <- lm(social_contributions ~ wa_rca + fdi +  import_uvi + inflation + size_agri, copula_trade_df_copulas)$residuals
+correction_property_tax <- lm(property_tax ~ wa_rca + fdi +  import_uvi + inflation + size_agri, copula_trade_df_copulas)$residuals
+correction_income_tax <- lm(income_tax ~ wa_rca + fdi +  import_uvi + inflation + size_agri, copula_trade_df_copulas)$residuals
+
+trade_and_the_se_df_cop_correction <- cbind(copula_trade_df_2, correction_applied_tariff_rate)
+trade_and_the_se_df_cop_correction <- cbind(trade_and_the_se_df_cop_correction, correction_trade_tax)
+trade_and_the_se_df_cop_correction <- cbind(trade_and_the_se_df_cop_correction, correction_sales_tax)
+trade_and_the_se_df_cop_correction <- cbind(trade_and_the_se_df_cop_correction, correction_social_contributions)
+trade_and_the_se_df_cop_correction <- cbind(trade_and_the_se_df_cop_correction, correction_property_tax)
+trade_and_the_se_df_cop_correction <- cbind(trade_and_the_se_df_cop_correction, correction_income_tax)
+trade_and_the_se_df_cop_correction
+
+formula <- se_size ~ applied_tariff_rate + trade_tax + import_uvi + wa_rca + fdi + income_tax + property_tax + social_contributions + sales_tax + inflation + size_agri + correction_applied_tariff_rate + correction_trade_tax + correction_income_tax + correction_property_tax + correction_social_contributions + correction_sales_tax + as.factor(year)
+
+final_cop_correction <- lm(formula, data = trade_and_the_se_df_cop_correction)
+# round(coeftest(final_cop_correction, vcov = vcovHC(final_cop_correction, type = "HC0")), 3)
+summary(final_cop_correction)
+# return_standard_latex(final_cop_correction, 'Results', dep.var.labels = c('SE Size'), as.text = T, remove_time_fixed_effects_estimators = T)
+```
+
+```{r}
+nrow(copula_trade_df)
+```
+### GMM Dynamic Panel Model (Single Lagged Dep. Var.)
+```{r}
+trade_and_the_se_df_cop_correction_gmm <- trade_and_the_se_df_cop_correction %>% 
+  mutate(se_size_lag = Lag(se_size, shift = 1))
+trade_and_the_se_df_cop_correction_gmm <- trade_and_the_se_df_cop_correction_gmm %>% drop_na()
+
+formula <- se_size ~ se_size_lag + applied_tariff_rate + trade_tax + wa_rca + import_uvi + social_contributions + property_tax + income_tax + sales_tax + inflation + size_agri + correction_applied_tariff_rate + correction_trade_tax + correction_sales_tax + correction_social_contributions + correction_property_tax + correction_income_tax + as.factor(year)
+final_cop_correction_with_gmm <- lm(formula, data = trade_and_the_se_df_cop_correction_gmm)
+# summary(final_cop_correction_with_gmm)
+coeftest(final_cop_correction_with_gmm, vcov = vcovHC(final_cop_correction_with_gmm, type = "HC0"))
+```
+
+```{r}
+trade_and_the_se_df_no_na[duplicated(trade_and_the_se_df_no_na), ]
+table(index(trade_and_the_se_df_no_na), useNA = "ifany")
+```
+
+### Two-Step System GMM
+```{r}
+system_formula <- se_size ~ se_size_lag + applied_tariff_rate + trade_tax + wa_rca + import_uvi + social_contributions + property_tax + income_tax + sales_tax + inflation + size_agri + as.factor(year)
+final_cop_correction_with_2_system_gmm <- pgmm(se_size ~ lag(se_size, 1) + lag(applied_tariff_rate, 0:1) + lag(trade_tax, 0:1) | lag(se_size, 2:99) + lag(applied_tariff_rate, 2:99) + lag(trade_tax, 2:99), 
+                                               data = trade_and_the_se_df, 
+                                               effect = "twoways", 
+                                               model = "twosteps", 
+                                               transformation = "d", 
+                                               collapse = TRUE)
+summary(final_cop_correction_with_2_system_gmm, robust = T)
+```
+
+```{r}
+?pgmm
+```
+
+### ARDL Dynamic Panel Model
+
+# Conclusions / Policy
+
+### Data Summary
+```{r}
+summary(trade_and_the_se_df)
+```
+```{r}
+length(trade_and_the_se_df$applied_tariff_rate[trade_and_the_se_df$applied_tariff_rate <= 5]) / length(trade_and_the_se_df$applied_tariff_rate)
+```
+
+### APEs
+
+
+Using nonparametric regression tactics to determine functional forms. For example, say I have a regression and believe that z might depend on x quadratically and also depend on xy. We can run a nonparametric regression with `z ~ x + y` and see if the functional form `z ~ x + x^2 + xy` makes some sense. Of course, a theoretical justification should be given.
