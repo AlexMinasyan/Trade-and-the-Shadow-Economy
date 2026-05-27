@@ -1,0 +1,461 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# TOC of Data Cleaning
+
+1.  [Libraries](#libraries)
+2.  [Directory Setup](#dir)
+3.  [Weighted Average Revealed Competitive Advantage Index](#wa_rca)
+4.  [Working with the Country Names](#country_names)
+5.  [Changing the Strucutre of the Data to Panel](#panel) \
+  5.1 [Dependent Variable](#dep_var) \
+  5.2 [Preliminaries](#pre_var) \
+  5.3 [Independent Variables](#indep_var) \
+  5.4 [Control Variables](#con_var)
+6.  [Scaling and Alterations](#alters)
+7.  [Checking Datasets](#checking)
+8.  [Filtering and Combining Data](#filtering)
+9.  [Interpolation and Final Cleaning](#interpolating)
+10. [Exporting the Dataset](#exporting)
+
+# Libraries <a name="libraries"></a> {#libraries}
+
+```{r, results = 'hide', warnings = FALSE}
+library(tidyverse)
+library(readxl)
+library(glue)
+library(purrr)
+library(roll)
+library(zoo)
+library(stargazer)
+library(varhandle)
+library(plm)
+library(lmtest)
+library(sandwich)
+library(broom)
+library(rstudioapi)
+library(Hmisc)
+```
+
+# Directory Setup <a name = "dir"></a>
+
+```{r}
+current_path <- getSourceEditorContext()$path
+current_directory <- strsplit(current_path, '/')[[1]][1:length(strsplit(current_path, '/')[[1]]) - 1]
+current_directory <- paste(as.character(current_directory), collapse = '/')
+current_directory
+
+get_file_path <- function(path) {
+  return(paste(current_directory, path, sep="/"))
+}
+```
+
+# Weighted Average Revealed Competitive Advantage Index <a name = "wa_rca"></a>
+Getting all WITS Files
+```{r}
+wits_files <- list.files(path = get_file_path("Data/WITS/EXP"), pattern="*.csv", full.names=TRUE, recursive=FALSE)
+wits_rca_files <- list.files(path = get_file_path("Data/WITS/RCA"), pattern="*.csv", full.names=TRUE, recursive=FALSE)
+all_wits_tibbles = wits_files %>% map( ~read_csv(.x))
+all_rca_tibbles = wits_rca_files %>% map( ~read_csv(.x))
+```
+
+Finding Countries that don't exist in all datasets
+```{r}
+first_tibble = all_wits_tibbles[[1]]
+original_countries <- data.frame(first_tibble)$country
+print(original_countries)
+
+find_inconsistent_nations <- function(list_of_tibbles) {
+  all_to_remove = ''
+  
+  for (i in 2:length(list_of_tibbles)) {
+    
+    b <- 1; j <- 1;  # b -> original; l -> current_check
+    
+    current_tibble = list_of_tibbles[[i]]
+    while(j <= length(data.frame(current_tibble)$country) && b <= length(data.frame(first_tibble)$country)) {
+      
+      if (data.frame(first_tibble)$country[b] != data.frame(current_tibble)$country[j]) {
+        
+        if (data.frame(first_tibble)$country[b + 1] == data.frame(current_tibble)$country[j]) {
+          j <- j - 1;
+          all_to_remove = paste(all_to_remove, data.frame(first_tibble)$country[b], sep = ':')
+          # print(glue('- {data.frame(list_of_tibbles[1])$country[b]}'));
+        } else if (data.frame(first_tibble)$country[b] == data.frame(current_tibble)$country[j + 1]) {
+          b <- b - 1 
+          all_to_remove = paste(all_to_remove, data.frame(current_tibble)$country[j], sep = ':')
+          # print(glue('+ {data.frame(list_of_tibbles[i])$country[j]}'));
+        } else {
+          print('Double Issue. Investigate Further'); break;
+        }
+      }; j <- j + 1; b <- b + 1
+      
+    }
+  }
+  countries_to_remove <- as.list(unlist(strsplit(all_to_remove, ':')))
+  return(countries_to_remove)
+}
+```
+Filtering out all countries to remove
+```{r}
+countries_to_remove <- find_inconsistent_nations(all_wits_tibbles)
+countries_to_remove <- unique(unlist(countries_to_remove, use.names = FALSE))
+countries_to_remove <- countries_to_remove[2:length(countries_to_remove)]
+
+rca_countries_to_remove <- find_inconsistent_nations(all_rca_tibbles)
+rca_countries_to_remove <- unique(unlist(rca_countries_to_remove, use.names = FALSE))
+rca_countries_to_remove <- rca_countries_to_remove[2:length(rca_countries_to_remove)]
+
+all_countries_to_remove = unique(c(countries_to_remove, rca_countries_to_remove))
+
+all_wits_tibbles_binded <- bind_rows(all_wits_tibbles)
+all_rca_tibbles_binded <- bind_rows(all_rca_tibbles)
+
+colnames(all_wits_tibbles_binded)[1] <- 'reporter_name'
+colnames(all_wits_tibbles_binded)[2] <- 'partner_name'
+colnames(all_wits_tibbles_binded)[3] <- 'trade_flow'
+colnames(all_wits_tibbles_binded)[4] <- 'product_group'
+colnames(all_wits_tibbles_binded)[5] <- 'indicator'
+colnames(all_rca_tibbles_binded)[1] <- 'reporter_name'
+colnames(all_rca_tibbles_binded)[2] <- 'partner_name'
+colnames(all_rca_tibbles_binded)[3] <- 'trade_flow'
+colnames(all_rca_tibbles_binded)[4] <- 'product_group'
+colnames(all_rca_tibbles_binded)[5] <- 'indicator'
+
+all_wits_tibbles_binded_wo_removing_countries <- all_wits_tibbles_binded %>% 
+  filter(! (reporter_name %in% all_countries_to_remove))
+
+all_rca_tibbles_binded_wo_removing_countries <- all_rca_tibbles_binded %>% 
+  filter(! (reporter_name %in% all_countries_to_remove))
+
+print(all_countries_to_remove)
+```
+Scaling Data to sum to 100
+```{r}
+countries <- as.list(unique(unlist(as.list(all_wits_tibbles_binded_wo_removing_countries$reporter_name))))
+scaled_wits_tibbles <- NULL
+for (country in countries) {
+  print(country)
+  a_df <- tibble(reporter_name = '', partner_name = '', trade_flow = '', product_group = '', indicator = '')[0,]
+  for (i in 1:length(all_wits_tibbles)) {
+    a_df <- a_df %>% 
+      add_row(reporter_name = "", partner_name = "", trade_flow = "", product_group = "", indicator = "")
+  }
+    
+  b1_df <- all_wits_tibbles_binded_wo_removing_countries %>% 
+    filter(reporter_name == country) %>% select(!c(code)) %>% 
+    bind_rows(summarise(.,
+                        across(where(is.numeric), sum),
+                        across(where(is.character), ~"Total"))) %>% 
+    dplyr::select(!c(reporter_name, partner_name, trade_flow, product_group, indicator))
+  b_df <- mapply('/', b1_df, b1_df[length(all_wits_tibbles) + 1, ])
+  # View(b_df)
+  
+  a_df$reporter_name <- (all_wits_tibbles_binded_wo_removing_countries %>% filter(reporter_name == country))$reporter_name
+  a_df$partner_name <- (all_wits_tibbles_binded_wo_removing_countries %>% filter(reporter_name == country))$partner_name
+  a_df$trade_flow <- (all_wits_tibbles_binded_wo_removing_countries %>% filter(reporter_name == country))$trade_flow
+  a_df$product_group <- (all_wits_tibbles_binded_wo_removing_countries %>% filter(reporter_name == country))$product_group
+  a_df$indicator <- (all_wits_tibbles_binded_wo_removing_countries %>% filter(reporter_name == country))$indicator
+  
+  b_df <- head(b_df, -1)
+  c_df <- cbind(a_df, b_df)
+  
+  if (i == 1) {
+    scaled_wits_tibbles <- c_df
+  } else {
+    scaled_wits_tibbles = rbind(scaled_wits_tibbles, c_df)
+  }
+}
+
+# setdiff(scaled_wits_tibbles$reporter_name, scaled_rca_tibbles$reporter_name)
+scaled_wits_tibbles <- scaled_wits_tibbles %>% 
+  filter(reporter_name != 'European Union')
+
+scaled_rca_tibbles <- all_rca_tibbles_binded_wo_removing_countries %>%
+  dplyr::select(-c('code')) %>% 
+  arrange(reporter_name)
+
+View(scaled_wits_tibbles)
+View(scaled_rca_tibbles)
+```
+Multiplying the Matrices to get the weighted average
+```{r}
+all_numeric_wits <- scaled_wits_tibbles %>% 
+  select(!c(reporter_name, partner_name, trade_flow, product_group, indicator))
+all_numeric_rca <- scaled_rca_tibbles %>% 
+  select(!c(reporter_name, partner_name, trade_flow, product_group, indicator))
+
+multiplied_rca_wits <- all_numeric_wits * all_numeric_rca
+
+all_countries <- unique(scaled_rca_tibbles$reporter_name)
+list_of_countries <- c(22 * length(all_countries))
+j <- 0
+for (country in all_countries) {
+  for (i in 1:22) {
+    list_of_countries[j * 22 + i] <- country
+  }; j <- j + 1
+}
+
+final_rca_dataframe_1 <- cbind(list_of_countries, multiplied_rca_wits)
+colnames(final_rca_dataframe_1)[1] <- 'reporter_name'
+```
+Summming across product categories for final averages
+```{r, warnings = FALSE}
+final_rca_dataframe_2 <- final_rca_dataframe_1 %>% 
+  group_by(reporter_name) %>% 
+  summarise_each(list(sum))
+View(final_rca_dataframe_2)
+```
+
+
+# Working with Country Names <a name = "country_names"></a>
+```{r, warning = FALSE}
+# Countries of se_size Dataset
+se_size_base <- read_csv(get_file_path('Extracting PDF Data/size_of_the_shadow_economy.csv'), show_col_types = FALSE)
+colnames(se_size_base)[1] <- 'country'
+se_dataset_countries <- unique(se_size_base$country)[-length(unique(se_size_base$country))]
+se_dataset_countries <- data.frame(matrix(unlist(se_dataset_countries), nrow=length(se_dataset_countries), byrow=TRUE))
+colnames(se_dataset_countries)[1] <- 'country'
+
+# Countries of WDI Database
+population_base <- read_csv(get_file_path('Data/WDI - Population/API_SP.POP.TOTL_DS2_en_csv_v2_61.csv'), show_col_types = FALSE)
+colnames(population_base)[1] <- 'country'; colnames(population_base)[2] <- 'code'
+wdi_countries_and_codes <- population_base %>% select('country', 'code')
+
+# Creating Correction Dataframe Pt. 1
+merge_1 <- merge(wdi_countries_and_codes, se_dataset_countries, by = c('country'), all = TRUE)
+
+# Countries of wa_rca Dataset
+named_country_wca_list_raw <- scan(get_file_path('Extracting PDF Data/country_name_changes_wca_dataset.txt'), what="", sep="\n")
+named_country_wca_list <- strsplit(named_country_wca_list_raw, "[[:space:]]->[[:space:]]")
+names(named_country_wca_list) <- sapply(named_country_wca_list, `[[`, 1)
+named_country_wca_list <- lapply(named_country_wca_list, `[`, -1)
+
+# Fixing the names of the wa_rca dataset
+final_rca_dataframe_3 <- final_rca_dataframe_2
+final_rca_dataframe_3$reporter_name <- lapply(final_rca_dataframe_3$reporter_name, function(name) { ifelse(name %in% names(named_country_wca_list), named_country_wca_list[name], name) } )
+final_rca_dataframe_3 <- final_rca_dataframe_3 %>% 
+  rename('country' = 'reporter_name') %>% 
+  arrange(country)
+final_rca_dataframe_3 <- as.data.frame(lapply(final_rca_dataframe_3, unlist))
+
+# Getting Updated wa_rca Countries
+wa_rca_countries <- unique(final_rca_dataframe_3$country)
+wa_rca_countries <- data.frame(matrix(unlist(wa_rca_countries), nrow=length(wa_rca_countries), byrow=TRUE))
+colnames(wa_rca_countries)[1] <- 'country'
+
+# Creating Correction Dataframe Pt. 2
+merge_2 <- merge(merge_1, wa_rca_countries, by = c('country'), all = TRUE)
+
+# Perfecting the wa_rca Dataset
+final_rca_dataframe_4 <- merge(final_rca_dataframe_3, merge_2, by = c('country'), all.x = TRUE)
+final_rca_dataframe_4 <- final_rca_dataframe_4 %>% select(country, code, 'X1988':'X2022')
+colnames(final_rca_dataframe_4)[-1:-2] <- as.numeric(1988:2022)
+final_rca_dataframe_4 <- final_rca_dataframe_4 %>% 
+  filter(!is.na(code))
+
+# IMF Countries Dataset
+named_country_imf_list_raw <- scan(get_file_path('Extracting PDF Data/country_name_changes_imf_dataset.txt'), what="", sep="\n")
+named_country_imf_list <- strsplit(named_country_imf_list_raw, "[[:space:]]->[[:space:]]")
+names(named_country_imf_list) <- sapply(named_country_imf_list, `[[`, 1)
+named_country_imf_list <- lapply(named_country_imf_list, `[`, -1)
+
+all_government_revenue_base <- read_csv(get_file_path('Data/IMF - World Revenue/dataset_2026-03-23T17_40_40.193148454Z_DEFAULT_INTEGRATION_IMF.FAD_WORLD_3.0.1.csv'), show_col_types = FALSE)
+all_government_revenue_base <- all_government_revenue_base %>% 
+  select( c(c('COUNTRY', 'INDICATOR'), as.character(as.list(1991:2015))) )
+colnames(all_government_revenue_base)[1] <- 'country'; colnames(all_government_revenue_base)[2] <- 'indicator'
+all_government_revenue_base$country  <- lapply(all_government_revenue_base$country, function(name) { ifelse(name %in% names(named_country_imf_list), named_country_imf_list[name], name) } )
+all_government_revenue_base <- all_government_revenue_base %>% arrange(country)
+all_government_revenue_base <- as.data.frame(lapply(all_government_revenue_base, unlist))
+all_government_revenue_base <- all_government_revenue_base %>% select(country, indicator, 'X1991':'X2015')
+colnames(all_government_revenue_base)[-1:-2] <- as.numeric(1991:2015)
+
+imf_countries <- unique(all_government_revenue_base$country)
+imf_countries <- data.frame(matrix(unlist(imf_countries), nrow=length(imf_countries), byrow=TRUE))
+colnames(imf_countries)[1] <- 'country'
+
+merge_3 <- merge(merge_2, imf_countries, by = c('country'), all = TRUE)
+
+all_government_revenue_base <- merge(all_government_revenue_base, merge_3, by = c('country'), all.x = TRUE)
+all_government_revenue_base <- all_government_revenue_base %>% 
+  filter(!is.na(code)) %>% 
+  select(country, code, indicator, '1991':'2015')
+
+
+# Fixing the se_size Dataset
+se_size_base <- merge(se_size_base, merge_2, by = c('country'), all.x = TRUE)
+se_size_base <- se_size_base %>% 
+  select(country, code, '1991':'2015') %>% 
+  filter(country != 'Av. over countries')
+
+countries_to_keep <- unique(se_size_base$country)
+```
+Note: an analysis of names was not done for the Heritage Foundation Data, that could add observations
+
+# Changing the Strucutre of the Data to Panel <a name = "panel"></a>
+### Dependent Variable <a name = 'dep_var'></a>
+```{r, results = 'hide'}
+# SE Size
+se_size_base <- read_csv(get_file_path('Extracting PDF Data/size_of_the_shadow_economy-adjusted.csv'), show_col_types = FALSE)
+se_size_base <- se_size_base %>% select(!c('Av. over years'))
+se_size = pivot_longer(se_size_base, cols = as.character(1991:2015), names_to = "year", values_to = 'se_size')
+```
+
+### Preliminaries <a name = 'pre_var'></a>
+```{r, results = 'hide'}
+# Population (for per capita measures)
+pivot_wdi <- function(csv_path, values_to) {
+  wdi_base <- read_csv(get_file_path(csv_path), show_col_types = FALSE)
+  wdi_base <- wdi_base[, -(length(wdi_base) - 1)]
+  wdi = pivot_longer(wdi_base, cols = as.character(1960:2024), names_to = "year", values_to = values_to)
+  wdi <- wdi %>% select('country', 'year', 'code', values_to)
+  return(wdi)
+}
+pivot_imf <- function(imf_base, values_to) {
+  imf = pivot_longer(imf_base, cols = as.character(1980:2024), names_to = "year", values_to = values_to)
+  imf <- imf %>% select('country', 'year', 'code', values_to)
+  return(imf)
+}
+
+# Population
+population <- pivot_wdi('Data/WDI - Population/API_SP.POP.TOTL_DS2_en_csv_v2_61-adjusted.csv', 'population')
+
+# Taxes
+# Tax Revenue Values
+tax_revenues_base <- read_csv(get_file_path('Data/IMF - World Revenue/dataset_2026-03-23T17_40_40.193148454Z_DEFAULT_INTEGRATION_IMF.FAD_WORLD_3.0.1-adjusted.csv'), show_col_types = FALSE)
+tax_revenues_base <- tax_revenues_base %>% select('country', 'code', 'indicator' = 'INDICATOR', as.character(1980:2024))
+
+# Exports and Imports
+# exports_with_per_cap <- merge(exports, population %>% select(-c('country')), 
+#                               by = c('code', 'year'), all.x = TRUE)
+# exports_with_per_cap <- exports_with_per_cap %>% 
+#   mutate(exports_per_cap = exports / population)
+```
+
+### Independent Variables <a name = 'indep_var'></a>
+```{r}
+# Tariff Rate
+tariff_rate <- pivot_wdi('Data/WDI - Tariff Rate, Applied, Weighted Mean, All Products/API_TM.TAX.MRCH.WM.AR.ZS_DS2_en_csv_v2_440-adjusted.csv', 'applied_tariff_rate')
+
+# Trade Taxes
+trade_taxes <- pivot_imf(tax_revenues_base %>% filter(indicator == 'Taxes on international trade and transactions, Percent of GDP'), 'trade_tax')
+
+# WA RCA
+wa_rca <- pivot_longer(final_rca_dataframe_4, cols = as.character(1988:2022), names_to = "year", values_to = "wa_rca")
+
+# Imports Unit Value Index
+imports_unit_values <- pivot_wdi('Data/WDI - Import Unit Value Index/API_TM.UVI.MRCH.XD.WD_DS2_en_csv_v2_10710-adjusted.csv', 'import_uvi')
+imports_unit_values <- imports_unit_values %>% 
+  mutate(import_uvi_lag = Lag(import_uvi, shift = 1), import_uvi_growth_rate = 100 * (import_uvi - import_uvi_lag) / import_uvi_lag) %>% 
+  select(-c('import_uvi_lag'))
+
+# Foreign Direct Investment
+fdi <- pivot_wdi('Data/WDI - FDI/API_BX.KLT.DINV.WD.GD.ZS_DS2_en_csv_v2_115540-adjusted.csv', 'fdi')
+
+# Average Time to Clear Exports
+export_clearance_time <- pivot_wdi('Data/WDI - Average Time to Clear Exports Through Customs (days)/API_IC.CUS.DURS.EX_DS2_en_csv_v2_9141-adjusted.csv', 'export_clearance_days')
+# View(export_clearance_time)
+
+sanctions_init <- read_csv('/Users/alex/Documents/School/Research/Trade and the Shadow Economy/Data Analysis/GSDB/GSDB_Sploded_Corrected.csv', show_col_types = F)
+```
+
+### Controls <a name = 'con_var'></a>
+```{r}
+# Index of Economic Freedom (Tax Burden)
+econ_freedom <- read_csv(get_file_path('Data/Index of Economic Freedom/heritage-index-of-economic-freedom-2026-03-12_2236-adjusted.csv'), show_col_types = FALSE)
+colnames(econ_freedom)[2] <- 'year'
+for (i in 1:length(colnames(econ_freedom))) {
+  colnames(econ_freedom)[i] <- tolower(gsub(' ', '_', colnames(econ_freedom)[i]))
+}
+econ_freedom <- econ_freedom %>% 
+  arrange(country, year) %>% 
+  select('country', 'year', 'code', overall_score:financial_freedom)
+
+# Other Tax Variables
+sales_taxes <- pivot_imf(tax_revenues_base %>% filter(indicator == 'Sales taxes, Percent of GDP'), 'sales_tax')
+social_contributions <- pivot_imf(tax_revenues_base %>% filter(indicator == 'Social security contributions, Percent of GDP'), 'social_contributions')
+income_taxes <- pivot_imf(tax_revenues_base %>% filter(indicator == 'Taxes on income, profits, and capital gains, Percent of GDP'), 'income_tax')
+property_taxes <- pivot_imf(tax_revenues_base %>% filter(indicator == 'Taxes on property, Percent of GDP'), 'property_tax')
+
+# CPI
+cpi <- pivot_wdi('Data/WDI - CPI/API_FP.CPI.TOTL.ZG_DS2_en_csv_v2_287-adjusted.csv', 'cpi')
+deflator_init <- pivot_wdi('Data/WDI - GDP Deflator Mixed Base Years/API_NY.GDP.DEFL.ZS_DS2_en_csv_v2_8603-adjusted.csv', 'inflation')
+
+# WGI
+government_effectiveness <- pivot_wdi('Data/WDI - WGI Government Effectiveness/API_GE.EST_DS2_en_csv_v2_4300-adjusted.csv', 'gov_eff')
+rule_of_law <- pivot_wdi('Data/WDI - WGI Rule of Law/API_RL.EST_DS2_en_csv_v2_5814-adjusted.csv', 'rule_law')
+regulatory_quality <- pivot_wdi('Data/WDI - WGI Regulatory Quality/API_RQ.EST_DS2_en_csv_v2_8225-adjusted.csv', 'reg_qua')
+control_of_corruption <- pivot_wdi('Data/WDI - WGI Control of Corruption/API_CC.EST_DS2_en_csv_v2_4455-adjusted.csv', 'cont_corr')
+
+# Size of Agricultural Sector
+agri <- pivot_wdi('Data/WDI - Size of Agricultural Sector/API_NV.AGR.TOTL.ZS_DS2_en_csv_v2_1401-adjusted.csv', 'size_agri')
+```
+Moving the Deflator to have 2015 as its base year
+```{r}
+deflator_2015 <- deflator_init %>% 
+  filter(year == 1995) %>% 
+  mutate(freq = 65) %>% uncount(freq) %>% 
+  mutate(year = rep(c(1960:2024), 217)) %>% 
+  select(c('country', 'year', 'inflation'))
+
+deflator <- merge(deflator_init, deflator_2015, by = c('country', 'year'), all.x = T, all.y = F)
+deflator <- deflator %>% mutate(inflation = inflation.x / inflation.y * 100) %>% select(-c('inflation.x', 'inflation.y'))
+```
+
+### Messing with Export Clearance Time
+```{r}
+grouped_statistics <- export_clearance_time %>% 
+  group_by(country) %>% 
+  summarise(Non_NAs = n() - sum(is.na(export_clearance_days)), mean = mean(export_clearance_days, na.rm = TRUE), sd = sd(export_clearance_days, na.rm = TRUE))
+View(grouped_statistics)
+```
+
+# Merging Data
+```{r}
+se_size_final <- se_size %>% select(country, year, se_size)
+
+tariff_rate_final <- tariff_rate %>% select(-c('code'))
+trade_taxes_final <- trade_taxes %>% select(-c('code'))
+wa_rca_final <- wa_rca %>% select(-c('code'))
+imports_unit_values_final <- imports_unit_values %>% select(-c('code'))
+sanctions_final <- sanctions_init %>% select(country, year, export_sanction = exp, import_sanction = imp)
+fdi_final <- fdi %>% select(-c('code'))
+
+tax_burden_final <- econ_freedom %>% select('country', 'year', 'tax_burden')
+sales_taxes_final <- sales_taxes %>% select(-c('code'))
+social_contributions_final <- social_contributions %>% select(-c('code'))
+property_taxes_final <- property_taxes %>% select(-c('code'))
+income_taxes_final <- income_taxes %>% select(-c('code'))
+cpi_final <- cpi %>% select(-c('code'))
+deflator_final <- deflator %>% select(-c('code'))
+agri_final <- agri %>% select(-c('code'))
+
+government_effectiveness_final <- government_effectiveness %>% select(-c('code'))
+rule_of_law_final <- rule_of_law %>% select(-c('code'))
+regulatory_quality_final <- regulatory_quality %>% select(-c('code'))
+control_of_corruption_final <- control_of_corruption %>% select(-c('code'))
+```
+
+```{r}
+all_final_dfs <- list(se_size_final, tariff_rate_final, trade_taxes_final, wa_rca_final, imports_unit_values_final, fdi_final, 
+                      tax_burden_final, sales_taxes_final, social_contributions_final, property_taxes_final, income_taxes_final, cpi_final, deflator_final, government_effectiveness_final, rule_of_law_final, regulatory_quality_final, control_of_corruption_final, agri_final)
+trade_and_the_se_df <- merge(all_final_dfs[1], all_final_dfs[2], by = c('country', 'year'))
+for (i in 3:length(all_final_dfs)) {
+  trade_and_the_se_df <- merge(trade_and_the_se_df, all_final_dfs[i], by = c('country', 'year'))
+}
+trade_and_the_se_df <- merge(trade_and_the_se_df, sanctions_final, by = c('country', 'year'), all.x = T)
+trade_and_the_se_df <- trade_and_the_se_df %>% mutate(import_sanction = replace_na(import_sanction, 0), export_sanction = replace_na(export_sanction, 0))
+
+View(trade_and_the_se_df)
+```
+
+# Exporting the Dataset <a name = 'exporting'></a>
+```{r}
+write.csv(trade_and_the_se_df, file = get_file_path('trade_and_the_se_2.csv'), row.names = F)
+```
+
+
+
+

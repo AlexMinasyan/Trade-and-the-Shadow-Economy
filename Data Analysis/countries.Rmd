@@ -1,0 +1,92 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+# Working with Countries
+## Libraries <a name="libraries"></a> {#libraries}
+```{r, results = 'hide', warnings = FALSE}
+library(tidyverse)
+library(rstudioapi)
+library(readxl)
+```
+
+## Directory Setup <a name = "dir"></a>
+
+```{r}
+current_path <- getSourceEditorContext()$path
+current_directory <- strsplit(current_path, '/')[[1]][1:length(strsplit(current_path, '/')[[1]]) - 1]
+current_directory <- paste(as.character(current_directory), collapse = '/')
+current_directory
+
+get_file_path <- function(path) {
+  return(paste(current_directory, path, sep="/"))
+}
+```
+
+# Loading Different Datasets Data
+```{r}
+any_wdi <- read_csv(get_file_path('Data/WDI - Population/API_SP.POP.TOTL_DS2_en_csv_v2_61.csv'))
+se_size <- read_csv(get_file_path('Extracting PDF Data/size_of_the_shadow_economy.csv'))
+imf_taxes <- read_csv(get_file_path('Data/IMF - World Revenue/dataset_2026-03-23T17_40_40.193148454Z_DEFAULT_INTEGRATION_IMF.FAD_WORLD_3.0.1.csv'))
+heritage_data <- read_csv(get_file_path('Data/Index of Economic Freedom/heritage-index-of-economic-freedom-2026-03-12_2236.csv'))
+wits_sample <- read_excel(get_file_path('Data/WITS/EXP/exp_animal.xlsx'), sheet = "Product-TimeSeries-Product")
+```
+
+# Getting Countries 
+```{r}
+print('WDI')
+print(colnames(any_wdi))
+print('SE Size')
+print(colnames(se_size))
+print('IMF')
+print(colnames(imf_taxes))
+print('Heritage')
+print(colnames(heritage_data))
+print('WITS')
+print(colnames(wits_sample))
+```
+
+
+```{r}
+countries_wdi <- any_wdi %>% 
+  select('country' = 'Country Name', 'code' = 'Country Code')
+countries_medina <- se_size %>% 
+  select('country' = 'Country') %>% 
+  mutate('code' = NA)
+countries_imf <- imf_taxes %>% 
+  select('country' = 'COUNTRY') %>% 
+  mutate('code' = NA)
+countries_heritage <- heritage_data %>% 
+  select('country' = 'Country') %>% 
+  mutate('code' = NA)
+countries_wits <- wits_sample %>% 
+  select('country' = 'Reporter Name') %>% 
+  mutate('code' = NA)
+```
+
+# Merging w/ codes
+```{r}
+View(countries_medina)
+countries <- distinct(rbind(countries_wdi, countries_medina), country, .keep_all = TRUE) %>% arrange(country)
+countries <- distinct(rbind(countries, countries_imf), country, .keep_all = TRUE) %>% arrange(country)
+countries <- distinct(rbind(countries, countries_heritage), country, .keep_all = TRUE) %>% arrange(country)
+countries <- distinct(rbind(countries, countries_wits), country, .keep_all = TRUE) %>% arrange(country)
+View(countries)
+# write.csv(countries, get_file_path('all_country_duplicates.csv'))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
